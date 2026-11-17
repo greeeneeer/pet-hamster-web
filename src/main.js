@@ -4,9 +4,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { buildBodyGeometry, buildParts, FLOOR_Y, EYE_SCALE } from './hamster.js';
 import { createFur } from './fur.js';
-import { createSoftBody, posePos, poseAngle } from './softbody.js';
+import { createSoftBody, posePos, poseAngle, walkPos, sitDrop, stabilizeHead } from './softbody.js';
 import { createPetting } from './petting.js';
 import { createMood, TANTRUM_TIME } from './mood.js';
+import { createRoamer } from './roam.js';
 import { sound } from './sound.js';
 
 // ── 렌더러 · 카메라 · 조명 ─────────────────────────
@@ -31,15 +32,18 @@ controls.target.set(0, 0.0, 0.05);
 controls.enableDamping = true;
 controls.enablePan = false;
 controls.minDistance = 2.5;
-controls.maxDistance = 8;
+controls.maxDistance = 22; // 방 전체 시점까지 물러날 수 있게
 controls.maxPolarAngle = Math.PI - 0.05; // 바닥 아래로 내려가 밑에서 올려다보기 가능
 controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }; // 왼쪽은 쓰다듬기용
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }; // 한 손가락: 햄스터 밖이면 돌려보기(petting.js가 조절), 두 손가락: 확대·축소 (이동은 꺼져 있음)
 
 // ── 햄스터 ─────────────────────────────────────────
 // body(고개 돌리기) 안에 털 메시들, 몸에 붙는 부위들, 클릭 판정용 메시가 들어간다.
+// walker(바닥 위 위치·방향, 걷기) → body(고개 돌리기·성질낼 때 들기)
+const walker = new THREE.Group();
 const body = new THREE.Group();
-scene.add(body);
+walker.add(body);
+scene.add(walker);
 
 const bodyGeo = buildBodyGeometry();
 const parts = buildParts();
@@ -49,7 +53,7 @@ const partList = parts.group.children;
 body.add(
   fur.mesh, parts.group,
   fur.addLimbFur(partList.filter((o) => o.userData.limb)),
-  fur.addLimbFur(partList.filter((o) => o.userData.tail), { furScale: 0.6, tail: true }), // 꼬리: 더 짧은 흰 털
+  fur.addLimbFur(partList.filter((o) => o.userData.tail), { furScale: 0.6 }), // 꼬리: 더 짧은 흰 털
 );
 
 // 클릭 판정용 메시: 엎드린 자세를 CPU에서 따로 적용하므로 형태를 복사해 씀
@@ -83,7 +87,23 @@ const shadowTex = (() => {
 const shadow = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 3.4), new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
 shadow.rotation.x = -Math.PI / 2;
 shadow.position.y = FLOOR_Y - 0.005;
-scene.add(shadow);
+walker.add(shadow); // 그림자도 햄스터를 따라 다님
+
+// 바닥 매트: 햄스터가 돌아다니는 방. 가장자리는 배경으로 스며들게
+const ROOM_R = 4.5;
+const matTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 512;
+  const g = c.getContext('2d'), grd = g.createRadialGradient(256, 256, 0, 256, 256, 256);
+  grd.addColorStop(0, 'rgba(236,217,186,1)'); grd.addColorStop(0.85, 'rgba(232,212,180,0.9)'); grd.addColorStop(1, 'rgba(232,212,180,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 512, 512);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+})();
+const floorMat = new THREE.Mesh(new THREE.CircleGeometry(ROOM_R, 96), new THREE.MeshBasicMaterial({ map: matTex, transparent: true, depthWrite: false, toneMapped: false }));
+floorMat.rotation.x = -Math.PI / 2;
+floorMat.position.y = FLOOR_Y - 0.012;
+floorMat.renderOrder = -1;
+scene.add(floorMat);
 
 // ── 기분 · 입력 ────────────────────────────────────
 const anim = { blink: 0, nextBlink: 2, close: 0, lie: 0 };
@@ -134,8 +154,7 @@ function resize() {
   camera.aspect = w / h;
   // 세로 화면(휴대폰)에서는 가로 시야가 좁아지므로 세로 시야를 넓혀 햄스터가 잘리지 않게
   const BASE_FOV = 30;
-  camera.fov = camera.aspect >= 1 ? BASE_FOV
-    : (2 * Math.atan(Math.tan((BASE_FOV / 2) * Math.PI / 180) * 0.8 / camera.aspect) * 180) / Math.PI;
+  camera.fov = Math.max(BASE_FOV, (2 * Math.atan(Math.tan((BASE_FOV / 2) * Math.PI / 180) * 0.8 / camera.aspect) * 180) / Math.PI);
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize);
@@ -146,8 +165,70 @@ const clock = new THREE.Clock();
 let t = 0, moodTextT = 0;
 const lerp = (a, b, k) => a + (b - a) * k;
 const tmpV = new THREE.Vector3(), tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
-const qPose = new THREE.Quaternion(), X_AXIS = new THREE.Vector3(1, 0, 0);
+const tmpW = new THREE.Vector3();
+const qPose = new THREE.Quaternion(), qWalk = new THREE.Quaternion(), qStab = new THREE.Quaternion();
+const X_AXIS = new THREE.Vector3(1, 0, 0), Z_AXIS = new THREE.Vector3(0, 0, 1);
 const ease = (x) => x * x * (3 - 2 * x);
+
+// ── 걷기 ───────────────────────────────────────────
+// 대각선 다리(왼앞+오른뒤, 오른앞+왼뒤)가 번갈아 앞뒤로 흔들리고, 앞으로 내딛는 발은 살짝 듦.
+const WALK_SPEED = 0.5;   // 걷는 속도 (몸 길이 단위/초)
+const STEP_HZ = 2.2;      // 걸음 빠르기 (속도가 최대일 때 1초에 몇 걸음 주기)
+const LEG_SWING = 0.38;   // 다리를 앞뒤로 흔드는 최대 각도
+const FOOT_LIFT = 0.05;   // 발을 드는 최대 높이
+const LEG_PHASE = [0, Math.PI, Math.PI, 0];
+const TURN_SPEED = 2.2;   // 방향을 트는 최대 속도 (rad/초)
+const walk = { speed: 0, phase: 0 };
+const legAngles = [0, 0, 0, 0], legLifts = [0, 0, 0, 0];
+// 돌아다니기 (켜기/끄기 버튼). 바닥 위에서 마우스를 움직이면 그쪽으로 따라감
+const roamer = createRoamer({ roomRadius: ROOM_R });
+let roamOn = true;
+const walkBtn = document.getElementById('walk');
+walkBtn?.classList.toggle('on', roamOn);
+walkBtn?.addEventListener('click', () => { roamOn = !roamOn; walkBtn.classList.toggle('on', roamOn); });
+const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -FLOOR_Y);
+const floorRay = new THREE.Raycaster(), floorNdc = new THREE.Vector2(), floorHit = new THREE.Vector3();
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse' || hover || e.buttons) return; // 햄스터 위거나 드래그 중이면 무시
+  const r = canvas.getBoundingClientRect();
+  floorNdc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  floorRay.setFromCamera(floorNdc, camera);
+  if (floorRay.ray.intersectPlane(floorPlane, floorHit)) roamer.seeMouse(floorHit.setY(0));
+});
+
+// ── 카메라 시점 ────────────────────────────────────
+// follow: 걸어가는 햄스터를 부드럽게 따라감 (따라가는 중에도 돌려보기 가능)
+// room:   방 전체를 내려다보는 고정 시점
+// 모드를 바꾸면 1초 동안 카메라가 부드럽게 옮겨감
+const FOLLOW_OFFSET = new THREE.Vector3(3.0, 1.3, 4.4);
+const ROOM_VIEW = { pos: new THREE.Vector3(0, 11, 13.5), target: new THREE.Vector3(0, FLOOR_Y, 0) }; // 매트 전체가 들어오게
+const cam = { mode: 'follow', t: 1, fromPos: new THREE.Vector3(), fromTarget: new THREE.Vector3() };
+const camBtn = document.getElementById('cam');
+function setCamMode(mode) {
+  cam.mode = mode; cam.t = 0;
+  cam.fromPos.copy(camera.position); cam.fromTarget.copy(controls.target);
+  if (camBtn) camBtn.textContent = mode === 'room' ? '방 전체' : '따라가기';
+}
+camBtn?.addEventListener('click', () => setCamMode(cam.mode === 'follow' ? 'room' : 'follow'));
+const camGoalPos = new THREE.Vector3(), camGoalTarget = new THREE.Vector3(), followPrev = new THREE.Vector3();
+function updateCamera(dt) {
+  if (cam.mode === 'follow') { camGoalTarget.copy(walker.position); camGoalPos.copy(walker.position).add(FOLLOW_OFFSET); }
+  else { camGoalTarget.copy(ROOM_VIEW.target); camGoalPos.copy(ROOM_VIEW.pos); }
+  if (cam.t < 1) {
+    // 모드 바꾸는 중: 시작 위치에서 목표 시점으로 부드럽게
+    cam.t = Math.min(1, cam.t + dt);
+    const k = ease(cam.t);
+    camera.position.lerpVectors(cam.fromPos, camGoalPos, k);
+    controls.target.lerpVectors(cam.fromTarget, camGoalTarget, k);
+  } else if (cam.mode === 'follow') {
+    // 따라가기: 사용자가 돌려 둔 각도는 그대로 두고, 햄스터가 움직인 만큼 카메라와 바라보는 점을 함께 옮김
+    const move = tmpC.copy(walker.position).sub(followPrev);
+    camera.position.add(move); controls.target.add(move);
+    controls.target.lerp(camGoalTarget, Math.min(1, dt * 3));
+  }
+  followPrev.copy(walker.position);
+}
+const tmpC = new THREE.Vector3();
 
 // 항상 초당 30프레임만 그려서 GPU 부담(발열)을 줄임
 const FPS = 30;
@@ -186,16 +267,55 @@ renderer.setAnimationLoop(() => {
   const rate = lerp(lerp(4.2, 2.6, happy), 2.0, lie);
   soft.update(dt, Math.sin(t * rate));
 
-  // 몸에 붙은 부품들도 자세·늘어남을 따라감
+  // 돌아다니기: 만지거나 잡거나 엎드리거나 성질낼 때는 멈춤
+  const busy = soft.held || mood.state.petting || !!hover || mood.state.lying || anim.lie > 0.05 || mood.state.tantrum > 0;
+  const roam = roamer.update(dt, { pos: walker.position, enabled: roamOn, busy });
+  // 바라볼 곳으로 방향을 틀고, 많이 틀어야 할수록 천천히 걸음
+  let turnSlow = 1;
+  if (roam.faceTo) {
+    const want = Math.atan2(roam.faceTo.x - walker.position.x, roam.faceTo.z - walker.position.z);
+    let diff = want - walker.rotation.y;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    walker.rotation.y += THREE.MathUtils.clamp(diff, -TURN_SPEED * dt, TURN_SPEED * dt);
+    turnSlow = Math.max(0.15, Math.cos(Math.min(Math.abs(diff), Math.PI / 2)));
+  }
+  // 걸음: 속도에 맞춰 걸음 주기와 다리 흔들림이 커짐 (방향 트는 중엔 제자리걸음에 가깝게)
+  walk.speed = lerp(walk.speed, roam.speed, Math.min(1, dt * 3));
+  const stride = Math.min(1.5, walk.speed / WALK_SPEED);
+  walk.phase += dt * Math.PI * 2 * STEP_HZ * stride;
+  for (let i = 0; i < 4; i++) {
+    const ph = walk.phase + LEG_PHASE[i];
+    legAngles[i] = LEG_SWING * stride * Math.sin(ph);           // +: 발이 뒤로 (땅을 밀어냄)
+    legLifts[i] = FOOT_LIFT * stride * Math.max(0, -Math.cos(ph)); // 앞으로 내딛는 동안 발을 듦
+  }
+  soft.uniforms.uLegAngle.value.fromArray(legAngles);
+  soft.uniforms.uLegLift.value.fromArray(legLifts);
+  soft.uniforms.uStand.value = Math.min(1, stride * 1.5); // 걸으면 엉덩이를 들고, 멈추면 바닥에 앉음
+  walker.translateZ(walk.speed * turnSlow * dt);
+  if (walker.position.length() > ROOM_R - 0.4) walker.position.setLength(ROOM_R - 0.4); // 매트 밖으로 안 나감
+  const nod = roam.nod * 0.45;                                  // 킁킁거릴 때 고개 숙임
+  soft.uniforms.uNod.value = nod;
+  // 몸의 통통·뒤뚱 (아래에서 body에 적용). 머리는 이걸 대부분 거꾸로 상쇄해서 거의 고정 (완전히 멈추면 어색해서 조금은 따라감)
+  const HEAD_STAB = 0.7;
+  const bob = 0.03 * stride * Math.abs(Math.sin(walk.phase));
+  const roll = 0.045 * stride * Math.sin(walk.phase);
+  soft.uniforms.uHeadStab.value.set(bob * HEAD_STAB, roll * HEAD_STAB);
+
+  // 몸에 붙은 부품들도 걷기·자세·늘어남을 따라감
   for (const obj of partList) {
     const base = obj.userData.base, anchor = obj.userData.anchor ?? base;
-    const limb = obj.userData.hand ? 1 : 0;
-    posePos(anchor, lie, limb, tmpA);
-    qPose.setFromAxisAngle(X_AXIS, limb ? 0 : poseAngle(anchor, lie));
+    const limb = obj.userData.hand ? 1 : 0, leg = obj.userData.leg;
+    const walked = leg === undefined ? tmpW.copy(anchor) : walkPos(anchor, leg, legAngles, legLifts, tmpW);
+    if (leg === undefined) walked.y += sitDrop(anchor, soft.uniforms.uStand.value, lie); // 꼬리는 엉덩이를 따라 내려감
+    const stabA = leg === undefined ? stabilizeHead(anchor, bob * HEAD_STAB, roll * HEAD_STAB, walked) : 0; // 얼굴 부품도 머리와 같이
+    posePos(walked, lie, limb, tmpA, limb ? 0 : nod);
+    qPose.setFromAxisAngle(X_AXIS, limb ? 0 : poseAngle(walked, lie, nod));
+    if (leg !== undefined) qWalk.setFromAxisAngle(X_AXIS, legAngles[leg]); else qWalk.identity();
     soft.offsetAt(tmpA, tmpV);
-    tmpB.copy(anchor).sub(base).applyQuaternion(qPose); // 기준점이 원점이 아닌 부품(입) 보정
+    qStab.setFromAxisAngle(Z_AXIS, stabA).multiply(qPose);
+    tmpB.copy(anchor).sub(base).applyQuaternion(qStab); // 기준점이 원점이 아닌 부품(입) 보정
     obj.position.copy(tmpA).add(tmpV).sub(tmpB);
-    obj.quaternion.copy(qPose).multiply(obj.userData.baseQuat);
+    obj.quaternion.copy(qStab).multiply(qWalk).multiply(obj.userData.baseQuat);
     if (limb) obj.visible = lie < 0.4; // 엎드리면 분홍 손은 몸 밑으로 숨김
   }
 
@@ -208,10 +328,12 @@ renderer.setAnimationLoop(() => {
   const tilt = -0.1 * open, py = FLOOR_Y, pz = -1.0;
   body.rotation.x = tilt;
   body.position.set(0, py - (py * Math.cos(tilt) - pz * Math.sin(tilt)), pz - (py * Math.sin(tilt) + pz * Math.cos(tilt)));
+  body.position.y += bob;  // 걸음마다 통통
+  body.rotation.z = roll;  // 좌우로 뒤뚱 (머리는 셰이더에서 거꾸로 상쇄해 고정)
 
   // 고개 돌리기: 커서(없으면 카메라) 쪽을 보되, 쓰다듬거나 잡고 있을 땐 거의 가만히
-  const target = hover?.world ?? camera.position;
-  const yaw = THREE.MathUtils.clamp(Math.atan2(target.x, target.z), -0.45, 0.45);
+  const target = walker.worldToLocal((hover?.world ?? camera.position).clone());
+  const yaw = THREE.MathUtils.clamp(Math.atan2(target.x, target.z), -0.45, 0.45) * (1 - stride); // 걸을 땐 앞을 봄
   const still = soft.held || anim.lie > 0.05 ? 0 : mood.state.petting ? 0.5 : 2.5;
   body.rotation.y = lerp(body.rotation.y, yaw, dt * still);
 
@@ -226,9 +348,9 @@ renderer.setAnimationLoop(() => {
   parts.eyes.forEach((e) => e.scale.set(EYE_SCALE.x * wide, EYE_SCALE.y * wide * (1 - squint * 0.94), EYE_SCALE.z));
 
   // 코 실룩 · 수염
-  const sniff = Math.max(0, Math.sin(t * 0.9)) ** 4;
+  const sniff = Math.max(Math.max(0, Math.sin(t * 0.9)) ** 4, roam.sniff); // 평소엔 가끔, 바닥을 킁킁거릴 땐 계속
   parts.nose.position.y += Math.sin(t * 30) * 0.006 * sniff; // 위에서 매 프레임 원위치로 돌려놓으므로 누적되지 않음
-  parts.whiskers.rotation.x = poseAngle(parts.whiskers.userData.base, lie) + Math.sin(t * 30) * 0.03 * sniff;
+  parts.whiskers.rotation.x = poseAngle(parts.whiskers.userData.base, lie, nod) + Math.sin(t * 30) * 0.03 * sniff;
 
   // 귀: 편안하면 뒤로 살짝 눕힘
   parts.ears.forEach((e) => { e.rotation.x = lerp(e.rotation.x, -happy * 0.5 - open * 0.6, dt * (open > 0 ? 10 : 3)); }); // 성질낼 땐 귀를 확 젖힘
@@ -236,6 +358,7 @@ renderer.setAnimationLoop(() => {
   moodTextT -= dt;
   if (moodTextT < 0) { moodEl.textContent = mood.text(); moodTextT = 0.2; }
 
+  updateCamera(dt);
   controls.update();
   renderer.render(scene, camera);
 });

@@ -1,6 +1,6 @@
 // 햄스터 몸 모양과 몸에 붙는 부위(눈·귀·코·입·수염·다리·꼬리). +z 방향이 얼굴이다.
 //
-// 몸은 덩어리 여러 개(몸통, 높이 든 머리, 가슴, 콧등, 주둥이)를 부드럽게 이어 붙인 모양이다.
+// 몸은 덩어리 여러 개(몸통, 높이 든 머리, 가슴, 콧등, 주둥이, 왼·오른 엉덩이, 허벅지 살)를 부드럽게 이어 붙인 모양이다.
 // 덩어리 사이가 매끄럽게 메워지면서 조랭이떡처럼 완만하게 잘록한 목이 생긴다.
 // (각 덩어리를 거리 함수로 두고 smooth-min으로 합친 뒤, 구의 꼭짓점을 그 표면으로 옮긴다)
 import * as THREE from 'three';
@@ -18,13 +18,26 @@ const SHAPE = {
   chest: { c: new V3(0, -0.12, 0.26), r: new V3(0.36, 0.28, 0.32) },  // 머리 아래 가슴 (작게)
   bridge:{ c: new V3(0, 0.43, 0.8),   r: new V3(0.31, 0.3, 0.36) },   // 이마에서 코로 볼록하게 이어지는 콧등
   snout: { c: new V3(0, 0.31, 1.06),  r: new V3(0.21, 0.2, 0.25) },   // 앞·위로 살짝 나온 주둥이
+  hipL:  { c: new V3(0.4, -0.2, -0.72),   r: new V3(0.26, 0.25, 0.3) },  // 허벅지 살 (뒷다리가 여기서 내려옴)
+  hipR:  { c: new V3(-0.4, -0.2, -0.72),  r: new V3(0.26, 0.25, 0.3) },
+  rumpL: { c: new V3(0.24, -0.04, -0.86), r: new V3(0.32, 0.44, 0.34) }, // 왼·오른 엉덩이 덩어리 (많이 겹쳐서 하나처럼 둥글되, 좌우가 따로 들림)
+  rumpR: { c: new V3(-0.24, -0.04, -0.86), r: new V3(0.32, 0.44, 0.34) },
 };
-const BLEND = { neck: 0.34, bridge: 0.2, snout: 0.25, chest: 0.24, bottom: 0.06 };
+const BLEND = { neck: 0.34, bridge: 0.2, snout: 0.25, chest: 0.24, hip: 0.2, rump: 0.12, rumpBody: 0.32, bottom: 0.06 };
+// 걷기에서 같은 쪽 뒷다리가 들릴 때 통째로 들리는 엉덩이 덩어리 중심 (2: 왼쪽, 3: 오른쪽)
+export const RUMP_CENTERS = [SHAPE.rumpL.c, SHAPE.rumpR.c];
+
+// 다리 회전축 (걷기). 0·1: 앞다리(왼·오른), 2·3: 뒷다리(왼·오른). 대각선(0·3, 1·2)끼리 같이 움직인다.
+export const LEG_PIVOTS = [
+  new V3(0.24, -0.22, 0.38), new V3(-0.24, -0.22, 0.38),
+  new V3(0.36, -0.3, -0.72), new V3(-0.36, -0.3, -0.72),
+];
 
 function ell(px, py, pz, { c, r }) {
   const x = (px - c.x) / r.x, y = (py - c.y) / r.y, z = (pz - c.z) / r.z;
   return (Math.sqrt(x * x + y * y + z * z) - 1) * Math.min(r.x, r.y, r.z);
 }
+const smooth01 = (t) => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
 function smin(a, b, k) { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }
 
 // 표면까지의 (대략적) 거리: 안쪽이 음수
@@ -33,7 +46,11 @@ function sdf(x, y, z) {
   d = smin(d, ell(x, y, z, SHAPE.chest), BLEND.chest);
   d = smin(d, ell(x, y, z, SHAPE.bridge), BLEND.bridge);
   d = smin(d, ell(x, y, z, SHAPE.snout), BLEND.snout);
-  return -smin(-d, -(BOTTOM_Y - y), BLEND.bottom); // 바닥은 납작하게 잘라냄
+  d = smin(d, ell(x, y, z, SHAPE.hipL), BLEND.hip);
+  d = smin(d, ell(x, y, z, SHAPE.hipR), BLEND.hip);
+  d = smin(d, smin(ell(x, y, z, SHAPE.rumpL), ell(x, y, z, SHAPE.rumpR), BLEND.rump), BLEND.rumpBody); // 몸통과 넓게 메워 부드럽게 이음
+  const bottom = BOTTOM_Y + 0.08 * smooth01((-0.2 - z) / 0.5);  // 엉덩이 쪽 바닥은 살짝 들려서 뒷다리가 보임
+  return -smin(-d, -(bottom - y), BLEND.bottom); // 바닥은 납작하게 잘라냄
 }
 
 function normalAt(p) {
@@ -273,21 +290,31 @@ export function buildParts() {
   mouth.userData.anchor = anchors.mouth; // 자식들이 몸 좌표로 놓여 있으므로 변형은 이 점 기준
 
   // 다리: 사진처럼 들린 머리·가슴 아래로 앞다리가 비스듬히 내려와 분홍 손으로 바닥을 짚음.
-  // 뒷다리는 엉덩이에 묻혀 있고 긴 분홍 뒷발만 살짝 보임.
+  // 뒷다리는 엉덩이 허벅지 살에서 굵게 내려와 긴 분홍 뒷발로 이어짐.
+  // userData.leg: 걷기에서 따라 움직일 다리 번호 (LEG_PIVOTS 참고)
   const hiddenMat = new THREE.MeshBasicMaterial(); // 털 메시로 대체되어 화면에는 안 그려짐
   const pawMat = new THREE.MeshStandardMaterial({ color: 0xe8868a, roughness: 0.55 });
   for (const s of [1, -1]) {
+    const front = s > 0 ? 0 : 1, hindLeg = s > 0 ? 2 : 3;
     const wrist = new V3(0.14 * s, FLOOR_Y + 0.05, 0.6);
-    group.add(limb(new V3(0.24 * s, -0.22, 0.38), wrist, 0.14, 0.062, hiddenMat)); // 몸 옆에서 굵게 내려옴
+    const arm = limb(LEG_PIVOTS[front], wrist, 0.14, 0.062, hiddenMat); // 몸 옆에서 굵게 내려옴
+    arm.userData.leg = front;
+    group.add(arm);
     const hand = paw({ palm: new V3(0.037, 0.017, 0.038), fingers: 4, fingerLen: 0.042, fingerR: 0.009, spread: 0.9, curl: 0.45 }, pawMat);
     hand.position.set(wrist.x, FLOOR_Y + 0.014, wrist.z);
     hand.rotation.y = -0.12 * s;
     hand.userData.hand = true; // 엎드리면 앞다리와 같이 몸 밑으로 들어가고 숨겨짐
+    hand.userData.leg = front;
     group.add(hand);
 
+    const ankle = new V3(0.33 * s, FLOOR_Y + 0.05, -0.64);
+    const thigh = limb(LEG_PIVOTS[hindLeg], ankle, 0.19, 0.06, hiddenMat); // 엉덩이 속에서 굵게 시작해 발목으로 가늘어짐
+    thigh.userData.leg = hindLeg;
+    group.add(thigh);
     const hind = paw({ palm: new V3(0.034, 0.016, 0.07), fingers: 5, fingerLen: 0.03, fingerR: 0.0065, spread: 1.0, curl: 0.35 }, pawMat);
-    hind.position.set(0.34 * s, FLOOR_Y + 0.016, -0.62);
+    hind.position.set(ankle.x, FLOOR_Y + 0.016, ankle.z - 0.02);
     hind.rotation.y = 0.12 * s;
+    hind.userData.leg = hindLeg;
     group.add(hind);
   }
 

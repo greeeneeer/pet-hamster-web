@@ -67,7 +67,7 @@ varying float vH, vLenF, vBellyW;
 // 눈·코·입 주변은 털을 짧게, 바닥 쪽도 조금 짧게
 float furLen(vec3 p) {
 #ifdef SOLID
-  return 0.55; // 다리: 짧은 털
+  return mix(0.55, 1.0, smoothstep(-0.5, -0.26, p.y)); // 다리: 몸에 붙은 윗부분은 몸과 같은 길이, 아래로 갈수록 짧은 털
 #endif
   float f = 1.0;
   f *= mix(0.35, 1.0, smoothstep(0.062, 0.1, distance(p, uEyeL)));
@@ -82,7 +82,7 @@ void main() {
   float h = float(gl_InstanceID) / (uShells - 1.0);
   vec3 n0 = normalize(normal);
   vec3 base = softPosition(position, n0);
-  vec3 n = poseNormal(position, n0, LIMB);
+  vec3 n = poseNormal(position, n0, limbW());
 
   vec3 grain = uGrain - n * dot(uGrain, n);
 #ifdef SOLID
@@ -114,14 +114,10 @@ void main() {
   vNl = n;
   vH = h;
   vLenF = lf;
-#ifdef SOLID
-  vCoat = uBelly;
-  vBellyW = 1.0;
-#else
+  // 다리·꼬리도 몸과 같은 무늬를 써서, 몸에 붙은 윗부분은 몸 색으로 이어지고 아래로 갈수록 배 색이 됨
   vec4 cc = coatColor(position);
   vCoat = cc.rgb;
   vBellyW = cc.a;
-#endif
   vec4 wp = modelMatrix * vec4(p, 1.0);
   vWorld = wp.xyz;
   gl_Position = projectionMatrix * viewMatrix * wp;
@@ -281,18 +277,21 @@ export function createFur(bodyGeometry, anchors, softBody) {
     },
 
     // 다리·꼬리: 모양들을 몸 좌표로 합쳐 같은 털(배 색, 짧은 털)을 입힌 메시를 돌려줌. 원래 메시는 숨김.
-    // furScale: 털 길이 배율, tail: 엎드릴 때 다리 자세(모으기·집어넣기)를 따르지 않는 부위
-    addLimbFur(limbs, { furScale = 1, tail = false } = {}) {
+    // furScale: 털 길이 배율. 다리 번호(userData.leg)가 있으면 걷기 동작을 따른다
+    addLimbFur(limbs, { furScale = 1 } = {}) {
       const geos = [];
       for (const g of limbs) {
         g.updateMatrix();
         for (const m of g.children) {
           m.updateMatrix();
-          geos.push(m.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(g.matrix, m.matrix)));
+          const geo = m.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(g.matrix, m.matrix));
+          // 걷기용 다리 번호 (꼬리는 -1)
+          geo.setAttribute('aLeg', new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count).fill(g.userData.leg ?? -1), 1));
+          geos.push(geo);
         }
         g.visible = false;
       }
-      const defines = tail ? { SOLID: 1, TAIL: 1 } : { SOLID: 1 };
+      const defines = { SOLID: 1 };
       const limbUniforms = { ...uniforms, uFurLen: { value: FUR_LEN * furScale } }; // 나머지 값은 몸과 공유
       const limbMat = new THREE.ShaderMaterial({ uniforms: limbUniforms, vertexShader: VERT, fragmentShader: FRAG, defines, alphaToCoverage: true });
       const limbMesh = new THREE.InstancedMesh(mergeGeometries(geos), limbMat, SHELLS);
