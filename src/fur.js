@@ -10,12 +10,12 @@ import { GLSL as SOFT_GLSL } from './softbody.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // back: 등 털끝 색, dark: 등줄기, belly: 배, root: 털 뿌리(안쪽) 색, rootAmt: 뿌리 색이 비치는 정도,
-// bellyShift: 배 쪽 색이 옆구리 위로 올라오는 정도
+// bellyShift: 배 쪽 색이 옆구리 위로 올라오는 정도, rootEdge: [뿌리 색이 끝나기 시작하는 높이, 다 끝나는 높이] (털 길이 비율, 좁을수록 경계가 또렷)
 export const COATS = {
-  golden: { back: '#c98a4b', dark: '#a8692f', belly: '#e6bd85', root: '#7a4a22', rootAmt: 0.25, bellyShift: 0 },    // 배까지 노란 골든
-  robo:   { back: '#8c7966', dark: '#5f4f43', belly: '#f7f3ee', root: '#191512', rootAmt: 1.0, bellyShift: 0.07 }, // 로보로스키: 흰 배, 등은 속은 검고 겉은 회갈색
-  cream:  { back: '#efd9b8', dark: '#d8b88e', belly: '#fbf3e8', root: '#c9a679', rootAmt: 0.2, bellyShift: 0 },
-  black:  { back: '#3a3330', dark: '#221d1b', belly: '#e9e2d9', root: '#141110', rootAmt: 0.4, bellyShift: 0 },
+  golden: { back: '#c98a4b', dark: '#a8692f', belly: '#e6bd85', root: '#7a4a22', rootAmt: 0.25, bellyShift: 0, rootEdge: [0.15, 0.85] },    // 배까지 노란 골든
+  robo:   { back: '#977657', dark: '#6b5039', belly: '#f7f3ee', root: '#15110e', rootAmt: 1.0, bellyShift: 0.07, rootEdge: [0.56, 0.66] }, // 로보로스키: 흰 배, 등은 속은 검고 겉은 회갈색
+  cream:  { back: '#efd9b8', dark: '#d8b88e', belly: '#fbf3e8', root: '#c9a679', rootAmt: 0.2, bellyShift: 0, rootEdge: [0.15, 0.85] },
+  black:  { back: '#3a3330', dark: '#221d1b', belly: '#e9e2d9', root: '#141110', rootAmt: 0.4, bellyShift: 0, rootEdge: [0.15, 0.85] },
 };
 
 const SHELLS = 14; // 겹 수: 많을수록 촘촘하지만 GPU 부담(발열)이 커짐
@@ -131,6 +131,7 @@ ${HASH_GLSL}
 uniform float uDensity;
 uniform vec3 uL1, uL2, uRoot;
 uniform float uRootAmt;
+uniform vec2 uRootEdge;
 varying vec3 vBase, vN, vT, vWorld, vNl, vCoat;
 varying float vH, vLenF, vBellyW;
 
@@ -173,7 +174,7 @@ void main() {
 
   vec3 base = vCoat * (0.78 + 0.4 * id);
   // 털 뿌리 쪽은 뿌리 색 (로보로스키: 속은 검고 겉은 회갈색). 배에는 적용하지 않음
-  base = mix(base, uRoot, uRootAmt * (1.0 - vBellyW) * (1.0 - smoothstep(0.15, 0.85, h)));
+  base = mix(base, uRoot, uRootAmt * (1.0 - vBellyW) * (1.0 - smoothstep(uRootEdge.x, uRootEdge.y, h)));
   base = mix(base, min(base * 1.1 + 0.02, vec3(1.0)), smoothstep(0.5, 1.0, h)); // 끝은 조금 밝게
 
   vec3 T = normalize(vT), N = normalize(vN), V = normalize(cameraPosition - vWorld);
@@ -213,6 +214,7 @@ export function createFur(bodyGeometry, anchors, softBody) {
     uRoot: { value: new THREE.Color(COATS.golden.root) },
     uRootAmt: { value: COATS.golden.rootAmt },
     uBellyShift: { value: COATS.golden.bellyShift },
+    uRootEdge: { value: new THREE.Vector2(...COATS.golden.rootEdge) },
   };
   const uniforms = {
     ...softBody.uniforms,
@@ -247,6 +249,7 @@ export function createFur(bodyGeometry, anchors, softBody) {
       coat.uRoot.value.set(COATS[name].root);
       coat.uRootAmt.value = COATS[name].rootAmt;
       coat.uBellyShift.value = COATS[name].bellyShift;
+      coat.uRootEdge.value.set(...COATS[name].rootEdge);
     },
 
     // 손이 닿은 곳의 털 눌림
