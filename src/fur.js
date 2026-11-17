@@ -260,7 +260,8 @@ export function createFur(bodyGeometry, anchors, softBody) {
     },
 
     // 다리: 다리 모양들을 몸 좌표로 합쳐 같은 털(배 색, 짧은 털)을 입힌 메시를 돌려줌. 원래 다리는 숨김.
-    addLimbFur(limbs) {
+    // furScale: 털 길이 배율, tail: 꼬리처럼 엎드릴 때 다리 자세(모으기)를 따르지 않는 부위
+    addLimbFur(limbs, { furScale = 1, tail = false } = {}) {
       const geos = [];
       for (const g of limbs) {
         g.updateMatrix();
@@ -270,7 +271,9 @@ export function createFur(bodyGeometry, anchors, softBody) {
         }
         g.visible = false;
       }
-      const limbMat = new THREE.ShaderMaterial({ uniforms, vertexShader: VERT, fragmentShader: FRAG, defines: { SOLID: 1 }, alphaToCoverage: true });
+      const defines = tail ? { SOLID: 1, TAIL: 1 } : { SOLID: 1 };
+      const limbUniforms = { ...uniforms, uFurLen: { value: FUR_LEN * furScale } }; // 나머지 값은 몸과 공유
+      const limbMat = new THREE.ShaderMaterial({ uniforms: limbUniforms, vertexShader: VERT, fragmentShader: FRAG, defines, alphaToCoverage: true });
       const limbMesh = new THREE.InstancedMesh(mergeGeometries(geos), limbMat, SHELLS);
       limbMesh.frustumCulled = false;
       return limbMesh;

@@ -55,7 +55,7 @@ vec3 softOffset(vec3 p, vec3 n) {
   o += uPull * exp(-dot(g, g) / ${(GRAB_R * GRAB_R).toFixed(4)});
   return o;
 }
-#ifdef SOLID
+#if defined(SOLID) && !defined(TAIL)
 const float LIMB = 1.0;
 #else
 const float LIMB = 0.0;

@@ -47,7 +47,11 @@ const bodyGeo = buildBodyGeometry();
 const face = buildFace();
 const soft = createSoftBody();
 const fur = createFur(bodyGeo, face.anchors, soft);
-body.add(fur.mesh, face.parts, fur.addLimbFur(face.parts.children.filter((o) => o.userData.limb)));
+body.add(
+  fur.mesh, face.parts,
+  fur.addLimbFur(face.parts.children.filter((o) => o.userData.limb)),
+  fur.addLimbFur(face.parts.children.filter((o) => o.userData.tail), { furScale: 0.6, tail: true }), // 꼬리: 더 짧은 흰 털
+);
 
 // 클릭 판정용 메시: 엎드린 자세를 CPU에서 따로 적용하므로 형태를 복사해 씀
 const hitGeo = bodyGeo.clone();

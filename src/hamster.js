@@ -273,19 +273,22 @@ export function buildFace() {
     parts.add(hind);
   }
 
-  // 꼬리: 엉덩이 뒤쪽 아래에서 털 밖으로 살짝만 나온 아주 짧은 분홍빛 꼬리
+  // 꼬리: 엉덩이 뒤쪽 아래에서 살짝 나온 아주 짧고 뭉툭한 꼬리
   {
     const { p, n } = surfFrom('body', 0, -0.32, -1);
     const dir = n.clone().add(new V3(0, -0.35, 0)).normalize();   // 살짝 아래로 처짐
     const tail = new THREE.Group();
     tail.position.copy(p);
     tail.quaternion.setFromUnitVectors(new V3(0, 1, 0), dir);
-    const nub = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.03, 0.08, 6, 12),
-      new THREE.MeshStandardMaterial({ color: 0xe6b0a4, roughness: 0.6 }),
-    );
-    nub.position.y = 0.075;                                        // 밑동은 털 속에 묻히고 끝만 털 밖으로
-    tail.add(nub);
+    // 짧은 원기둥 + 납작하게 누른 반구 끝 = 뭉툭한 꼬리. 짧은 흰 털을 입힘 (fur.addLimbFur)
+    const tailMat = new THREE.MeshStandardMaterial({ color: 0xf3e6d3, roughness: 0.9 });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.042, 0.08, 16, 1, true), tailMat);
+    shaft.position.y = 0.04;
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.036, 16, 10), tailMat);
+    tip.scale.set(1, 0.5, 1);                                      // 끝을 납작하게 눌러 뭉툭하게
+    tip.position.y = 0.08;
+    tail.add(shaft, tip);
+    tail.userData.tail = true;
     parts.add(tail);
   }
 
