@@ -273,6 +273,22 @@ export function buildFace() {
     parts.add(hind);
   }
 
+  // 꼬리: 엉덩이 뒤쪽 아래에서 털 밖으로 살짝만 나온 아주 짧은 분홍빛 꼬리
+  {
+    const { p, n } = surfFrom('body', 0, -0.32, -1);
+    const dir = n.clone().add(new V3(0, -0.35, 0)).normalize();   // 살짝 아래로 처짐
+    const tail = new THREE.Group();
+    tail.position.copy(p);
+    tail.quaternion.setFromUnitVectors(new V3(0, 1, 0), dir);
+    const nub = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.03, 0.08, 6, 12),
+      new THREE.MeshStandardMaterial({ color: 0xe6b0a4, roughness: 0.6 }),
+    );
+    nub.position.y = 0.075;                                        // 밑동은 털 속에 묻히고 끝만 털 밖으로
+    tail.add(nub);
+    parts.add(tail);
+  }
+
   // 몸이 늘어나거나 숨쉴 때 함께 움직일 부품들의 원래 위치 기록
   for (const obj of parts.children) {
     obj.userData.base = obj.position.clone();
