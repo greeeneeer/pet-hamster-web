@@ -1,14 +1,18 @@
 // 햄스터의 기분. 쓰다듬는 방식에 따라 좋아함(happy)·싫어함(annoyed)이 오르내린다.
 // '너무 좋아요…'(happy > 0.7) 상태에서 계속 쓰다듬으면 엎드리고(lying),
 // 한동안 손길이 없으면 다시 일어난다.
+// '끙…'(annoyed > 0.6)이 한동안 이어지면 성질을 내며 입을 크게 벌린다(tantrum). 쌓인 좋은 기분은 그대로 둔다.
 import * as THREE from 'three';
 
 const GRAIN = new THREE.Vector3(0, -0.3, -1).normalize(); // 털 결: 코 → 엉덩이
 const BLISS_TO_LIE = 2.5;  // '너무 좋아요' 상태에서 이만큼(몸 길이 단위) 더 쓰다듬으면 엎드림
 const IDLE_TO_STAND = 6;   // 엎드린 뒤 이 시간(초) 동안 손길이 없으면 일어남
+const GRUMP_TO_TANTRUM = 2; // '끙…'이 이만큼(초) 이어지면 성질냄
+export const TANTRUM_TIME = 1.1; // 성질내는 동작 길이(초)
+const TANTRUM_COOLDOWN = 3;  // 성질낸 뒤 다시 낼 때까지 쉬는 시간(초)
 
-export function createMood() {
-  const s = { happy: 0, annoyed: 0, petting: false, held: false, lying: false, bliss: 0, idle: 0 };
+export function createMood({ onTantrum } = {}) {
+  const s = { happy: 0, annoyed: 0, petting: false, held: false, lying: false, bliss: 0, idle: 0, grumpT: 0, tantrum: 0, tantrumCool: 0 };
 
   const standUp = () => { s.lying = false; s.bliss = 0; };
 
@@ -36,8 +40,21 @@ export function createMood() {
       s.annoyed = Math.max(0, s.annoyed - dt * 0.5);
       if (s.lying && s.idle > IDLE_TO_STAND) standUp();
       if (!s.lying && s.happy <= 0.7) s.bliss = Math.max(0, s.bliss - dt * 0.5);
+
+      // '끙…'이 이어진 시간을 재다가 성질냄. 성질을 내고 나면 조금 풀림
+      s.grumpT = !s.held && s.annoyed > 0.6 ? s.grumpT + dt : Math.max(0, s.grumpT - dt * 2);
+      if (s.tantrum > 0) {
+        s.tantrum = Math.max(0, s.tantrum - dt);
+        if (s.tantrum === 0) { s.annoyed = Math.min(s.annoyed, 0.3); s.tantrumCool = TANTRUM_COOLDOWN; }
+      } else if (s.tantrumCool > 0) {
+        s.tantrumCool -= dt;
+      } else if (s.grumpT > GRUMP_TO_TANTRUM) {
+        s.tantrum = TANTRUM_TIME; s.grumpT = 0;
+        onTantrum?.();
+      }
     },
     text() {
+      if (s.tantrum > 0) return '캬악!';
       if (s.held) return s.annoyed > 0.4 ? '으앗, 늘어나요!' : '쭈욱…';
       if (s.annoyed > 0.6) return '끙…';
       if (s.lying) return '녹아내려요…';

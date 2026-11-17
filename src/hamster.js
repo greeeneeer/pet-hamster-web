@@ -97,6 +97,23 @@ function buildMouth() {
   for (const s of [1, -1]) {
     mouth.add(tube(surfaceCurve('snout', [[0, -0.55, 1], [0.1 * s, -0.66, 1], [0.22 * s, -0.78, 0.98], [0.3 * s, -0.86, 0.95]], 0.034))); // 끝이 아래로: 웃지 않는 ㅅ자
   }
+
+  // 벌린 입: ㅅ자가 갈라지는 곳에서 아래로 열리는 어두운 입속과 혀. 평소엔 닫혀 있고(높이 0), 성질낼 때 벌어짐
+  const { p, n } = surfFrom('snout', 0, -0.55, 1);
+  const open = new THREE.Group();
+  open.position.copy(p).addScaledVector(n, 0.036);
+  open.lookAt(open.position.clone().add(n));
+  const inside = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), new THREE.MeshStandardMaterial({ color: 0x4a1f22, roughness: 0.8 }));
+  inside.scale.set(0.075, 0.1, 0.018);
+  inside.position.y = -0.09;                                     // 위쪽 끝이 갈라지는 곳에 오도록
+  const tongue = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 10), new THREE.MeshStandardMaterial({ color: 0xd46f78, roughness: 0.5 }));
+  tongue.scale.set(0.048, 0.032, 0.014);
+  tongue.position.set(0, -0.14, 0.008);
+  open.add(inside, tongue);
+  open.scale.set(0.6, 0, 1);
+  open.visible = false;
+  mouth.add(open);
+  mouth.userData.open = open;
   return mouth;
 }
 
@@ -298,5 +315,5 @@ export function buildParts() {
     obj.userData.baseQuat = obj.quaternion.clone();
   }
 
-  return { group, eyes, ears, nose, whiskers, anchors };
+  return { group, eyes, ears, nose, whiskers, mouthOpen: mouth.userData.open, anchors };
 }

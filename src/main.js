@@ -6,7 +6,7 @@ import { buildBodyGeometry, buildParts, FLOOR_Y, EYE_SCALE } from './hamster.js'
 import { createFur } from './fur.js';
 import { createSoftBody, posePos, poseAngle } from './softbody.js';
 import { createPetting } from './petting.js';
-import { createMood } from './mood.js';
+import { createMood, TANTRUM_TIME } from './mood.js';
 import { sound } from './sound.js';
 
 // ── 렌더러 · 카메라 · 조명 ─────────────────────────
@@ -87,7 +87,7 @@ scene.add(shadow);
 
 // ── 기분 · 입력 ────────────────────────────────────
 const anim = { blink: 0, nextBlink: 2, close: 0, lie: 0 };
-const mood = createMood();
+const mood = createMood({ onTantrum: () => sound.hiss() });
 
 let hover = null, strokeT = 0, squeakedThisGrab = false;
 const grabWorld = []; // 잡은 자리마다 처음 잡은 점 (월드 좌표)
@@ -122,6 +122,8 @@ document.getElementById('coats').addEventListener('click', (e) => {
   document.querySelectorAll('#coats button').forEach((x) => x.classList.toggle('on', x === b));
   fur.setCoat(b.dataset.coat);
 });
+// 브라우저는 사용자가 한 번 누른 뒤에야 소리를 허락하므로, 아무 데나 누르면 소리를 켤 준비를 함
+addEventListener('pointerdown', () => sound.unlock());
 document.getElementById('sound').addEventListener('click', (e) => {
   e.currentTarget.textContent = sound.toggle() ? '🔈' : '🔇';
 });
@@ -197,6 +199,16 @@ renderer.setAnimationLoop(() => {
     if (limb) obj.visible = lie < 0.4; // 엎드리면 분홍 손은 몸 밑으로 숨김
   }
 
+  // 성질내기: 입을 빠르게 크게 벌렸다(0.15초) 잠깐 버티고 천천히 닫음. 그동안 고개를 살짝 쳐들고 눈을 찡그림
+  const tp = mood.state.tantrum > 0 ? 1 - mood.state.tantrum / TANTRUM_TIME : 1;
+  const open = ease(tp < 0.15 ? tp / 0.15 : tp < 0.65 ? 1 : Math.max(0, 1 - (tp - 0.65) / 0.35));
+  parts.mouthOpen.visible = open > 0.01;
+  parts.mouthOpen.scale.set(0.6 + 0.4 * open, open, 1);
+  // 엉덩이 쪽 바닥을 축으로 앞쪽만 들리게 (몸 전체를 가운데 기준으로 돌리면 엉덩이가 바닥에 묻힘)
+  const tilt = -0.1 * open, py = FLOOR_Y, pz = -1.0;
+  body.rotation.x = tilt;
+  body.position.set(0, py - (py * Math.cos(tilt) - pz * Math.sin(tilt)), pz - (py * Math.sin(tilt) + pz * Math.cos(tilt)));
+
   // 고개 돌리기: 커서(없으면 카메라) 쪽을 보되, 쓰다듬거나 잡고 있을 땐 거의 가만히
   const target = hover?.world ?? camera.position;
   const yaw = THREE.MathUtils.clamp(Math.atan2(target.x, target.z), -0.45, 0.45);
@@ -209,7 +221,7 @@ renderer.setAnimationLoop(() => {
   anim.blink = Math.max(0, anim.blink - dt * 8);
   // 잡아당겨도 감은 눈은 감은 채로, 뜬 눈은 늘어나는 만큼 살짝 커짐
   anim.close = lerp(anim.close, happy > 0.7 || mood.state.lying ? 1 : 0, Math.min(1, dt * 4));
-  const squint = Math.max(happy * 0.6, anim.close, anim.blink);
+  const squint = Math.max(happy * 0.6, anim.close, anim.blink, open * 0.75); // 성질낼 땐 찡그림
   const wide = soft.held ? 1 + Math.min(0.15, stretch * 0.5) * (1 - anim.close) : 1;
   parts.eyes.forEach((e) => e.scale.set(EYE_SCALE.x * wide, EYE_SCALE.y * wide * (1 - squint * 0.94), EYE_SCALE.z));
 
@@ -219,7 +231,7 @@ renderer.setAnimationLoop(() => {
   parts.whiskers.rotation.x = poseAngle(parts.whiskers.userData.base, lie) + Math.sin(t * 30) * 0.03 * sniff;
 
   // 귀: 편안하면 뒤로 살짝 눕힘
-  parts.ears.forEach((e) => { e.rotation.x = lerp(e.rotation.x, -happy * 0.5, dt * 3); });
+  parts.ears.forEach((e) => { e.rotation.x = lerp(e.rotation.x, -happy * 0.5 - open * 0.6, dt * (open > 0 ? 10 : 3)); }); // 성질낼 땐 귀를 확 젖힘
 
   moodTextT -= dt;
   if (moodTextT < 0) { moodEl.textContent = mood.text(); moodTextT = 0.2; }
