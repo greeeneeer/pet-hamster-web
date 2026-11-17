@@ -9,11 +9,13 @@ import * as THREE from 'three';
 import { GLSL as SOFT_GLSL } from './softbody.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
+// back: 등 털끝 색, dark: 등줄기, belly: 배, root: 털 뿌리(안쪽) 색, rootAmt: 뿌리 색이 비치는 정도,
+// bellyShift: 배 쪽 색이 옆구리 위로 올라오는 정도
 export const COATS = {
-  golden: { back: '#c98a4b', dark: '#8f5a2e', belly: '#f3e6d3' },
-  winter: { back: '#bfbab3', dark: '#6e6862', belly: '#f6f3ef' },
-  cream:  { back: '#efd9b8', dark: '#d8b88e', belly: '#fbf3e8' },
-  black:  { back: '#3a3330', dark: '#221d1b', belly: '#e9e2d9' },
+  golden: { back: '#c98a4b', dark: '#a8692f', belly: '#e6bd85', root: '#7a4a22', rootAmt: 0.25, bellyShift: 0 },    // 배까지 노란 골든
+  robo:   { back: '#8c7966', dark: '#5f4f43', belly: '#f7f3ee', root: '#191512', rootAmt: 1.0, bellyShift: 0.07 }, // 로보로스키: 흰 배, 등은 속은 검고 겉은 회갈색
+  cream:  { back: '#efd9b8', dark: '#d8b88e', belly: '#fbf3e8', root: '#c9a679', rootAmt: 0.2, bellyShift: 0 },
+  black:  { back: '#3a3330', dark: '#221d1b', belly: '#e9e2d9', root: '#141110', rootAmt: 0.4, bellyShift: 0 },
 };
 
 const SHELLS = 14; // 겹 수: 많을수록 촘촘하지만 GPU 부담(발열)이 커짐
@@ -36,16 +38,19 @@ float vnoise(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * 
 // 털 색 무늬 (꼭짓점마다 한 번만 계산해 픽셀 셰이더 부담을 줄임)
 const COAT_GLSL = /* glsl */ `
 uniform vec3 uBack, uDark, uBelly;
-vec3 coatColor(vec3 p){
+uniform float uBellyShift;
+// rgb: 색, a: 배 쪽 무늬 비율 (털 뿌리 색을 배에는 적용하지 않으려고)
+vec4 coatColor(vec3 p){
   float n = vnoise(p * 4.0) - 0.5;
-  float belly  = smoothstep(-0.28, -0.46, p.y + n * 0.1);                                // 배
-  float throat = smoothstep(0.25, 0.5, p.z) * smoothstep(0.12, -0.12, p.y + n * 0.08);  // 턱 밑·가슴
+  float belly  = smoothstep(-0.28, -0.46, p.y + n * 0.1 - uBellyShift);                  // 배
+  float throat = smoothstep(0.25, 0.5, p.z) * smoothstep(0.12, -0.12, p.y + n * 0.08 - uBellyShift * 0.8); // 턱 밑·가슴
   float muzzle = smoothstep(0.92, 1.1, p.z + n * 0.06) * smoothstep(0.38, 0.22, p.y);   // 주둥이 아래·입 주변
   float rump   = smoothstep(-0.95, -1.15, p.z) * smoothstep(-0.1, -0.35, p.y);          // 엉덩이 아래
   float top    = smoothstep(0.35, 0.65, p.y + n * 0.15) * smoothstep(0.45, 0.0, p.z);   // 등줄기
   belly = max(belly, throat);
   vec3 c = mix(uBack, uDark, top * 0.45);
-  return mix(c, uBelly, clamp(max(max(belly, muzzle), rump), 0.0, 1.0));
+  float w = clamp(max(max(belly, muzzle), rump), 0.0, 1.0);
+  return vec4(mix(c, uBelly, w), w);
 }`;
 
 const VERT = /* glsl */ `
@@ -56,7 +61,7 @@ uniform float uShells, uFurLen, uTime, uTouchAmt;
 uniform vec3 uTouch, uGrain, uNose, uEyeL, uEyeR, uMouth;
 uniform sampler2D uComb;
 varying vec3 vBase, vN, vT, vWorld, vNl, vCoat;
-varying float vH, vLenF;
+varying float vH, vLenF, vBellyW;
 
 // 눈·코·입 주변은 털을 짧게, 바닥 쪽도 조금 짧게
 float furLen(vec3 p) {
@@ -110,8 +115,11 @@ void main() {
   vLenF = lf;
 #ifdef SOLID
   vCoat = uBelly;
+  vBellyW = 1.0;
 #else
-  vCoat = coatColor(position);
+  vec4 cc = coatColor(position);
+  vCoat = cc.rgb;
+  vBellyW = cc.a;
 #endif
   vec4 wp = modelMatrix * vec4(p, 1.0);
   vWorld = wp.xyz;
@@ -121,9 +129,10 @@ void main() {
 const FRAG = /* glsl */ `
 ${HASH_GLSL}
 uniform float uDensity;
-uniform vec3 uL1, uL2;
+uniform vec3 uL1, uL2, uRoot;
+uniform float uRootAmt;
 varying vec3 vBase, vN, vT, vWorld, vNl, vCoat;
-varying float vH, vLenF;
+varying float vH, vLenF, vBellyW;
 
 // 3D 격자 칸마다 털 한 가닥. 가닥마다 길이가 다르고 끝으로 갈수록 가늘다.
 // 표면에 수직인 성분은 빼고 표면 위 거리만 재서, 격자를 비스듬히 자를 때 생기는 동심원 무늬를 없앤다.
@@ -163,6 +172,8 @@ void main() {
   if (a < 0.04) discard;
 
   vec3 base = vCoat * (0.78 + 0.4 * id);
+  // 털 뿌리 쪽은 뿌리 색 (로보로스키: 속은 검고 겉은 회갈색). 배에는 적용하지 않음
+  base = mix(base, uRoot, uRootAmt * (1.0 - vBellyW) * (1.0 - smoothstep(0.15, 0.85, h)));
   base = mix(base, min(base * 1.1 + 0.02, vec3(1.0)), smoothstep(0.5, 1.0, h)); // 끝은 조금 밝게
 
   vec3 T = normalize(vT), N = normalize(vN), V = normalize(cameraPosition - vWorld);
@@ -199,6 +210,9 @@ export function createFur(bodyGeometry, anchors, softBody) {
     uBack: { value: new THREE.Color(COATS.golden.back) },
     uDark: { value: new THREE.Color(COATS.golden.dark) },
     uBelly: { value: new THREE.Color(COATS.golden.belly) },
+    uRoot: { value: new THREE.Color(COATS.golden.root) },
+    uRootAmt: { value: COATS.golden.rootAmt },
+    uBellyShift: { value: COATS.golden.bellyShift },
   };
   const uniforms = {
     ...softBody.uniforms,
@@ -230,6 +244,9 @@ export function createFur(bodyGeometry, anchors, softBody) {
       coat.uBack.value.set(COATS[name].back);
       coat.uDark.value.set(COATS[name].dark);
       coat.uBelly.value.set(COATS[name].belly);
+      coat.uRoot.value.set(COATS[name].root);
+      coat.uRootAmt.value = COATS[name].rootAmt;
+      coat.uBellyShift.value = COATS[name].bellyShift;
     },
 
     // 손이 닿은 곳의 털 눌림
