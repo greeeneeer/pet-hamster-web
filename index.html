@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>햄찌 쓰다듬기</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <header class="hud top">
+    <h1>햄찌 쓰다듬기</h1>
+    <p class="hint desktop">마우스를 올려 쓰다듬기 · 왼쪽 버튼으로 잡아당기기 · 오른쪽 드래그로 돌려보기 · 휠로 확대</p>
+    <p class="hint touch">햄스터를 쓸어 쓰다듬기 · 길게 누른 뒤 끌어 잡아당기기 · 바깥을 끌어 돌려보기 · 두 손가락으로 확대</p>
+  </header>
+
+  <footer class="hud bottom">
+    <div id="mood" class="mood">킁킁…</div>
+    <div class="coats" id="coats">
+      <button data-coat="golden" class="on">골든</button>
+      <button data-coat="winter">윈터화이트</button>
+      <button data-coat="cream">크림</button>
+      <button data-coat="black">블랙</button>
+    </div>
+    <button id="sound" class="sound" title="소리 켜기/끄기">🔈</button>
+  </footer>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
