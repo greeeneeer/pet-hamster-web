@@ -1,6 +1,6 @@
 // 햄스터의 기분. 쓰다듬는 방식에 따라 좋아함(happy)·싫어함(annoyed)이 오르내린다.
 // '너무 좋아요…'(happy > 0.7) 상태에서 계속 쓰다듬으면 엎드리고(lying),
-// 한동안 손길이 없으면 다시 일어난다.
+// 한동안 손길이 없으면 다시 일어난다. 목덜미를 잡아 들었다 내려놓으면 처음 기분으로 돌아간다.
 // '끙…'(annoyed > 0.6)이 한동안 이어지면 성질을 내며 입을 크게 벌린다(tantrum). 쌓인 좋은 기분은 그대로 둔다.
 import * as THREE from 'three';
 
@@ -18,6 +18,8 @@ export function createMood({ onTantrum } = {}) {
 
   return {
     state: s,
+    // 처음 기분으로 (들어올렸다 내려놓았을 때: 정신이 번쩍 들어 쌓인 기분이 사라짐)
+    reset() { Object.assign(s, { happy: 0, annoyed: 0, lying: false, bliss: 0, grumpT: 0 }); },
     stroke({ local, normal, dir, dist, speed }) {
       const grain = GRAIN.clone().addScaledVector(normal, -GRAIN.dot(normal)).normalize();
       const along = dir.dot(grain);

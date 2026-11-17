@@ -136,8 +136,11 @@ createPetting({
   },
   onRelease(slot) {
     soft.release(slot);
-    const moved = hang.release(slot); // 들려 있었으면 옮긴 자리에 떨어짐
-    if (moved) keepInRoom(walker.position.add(moved.applyQuaternion(walker.quaternion)));
+    const moved = hang.release(slot); // 들려 있었으면 옮긴 자리에 떨어지고, 기분은 처음으로
+    if (moved) {
+      keepInRoom(walker.position.add(moved.applyQuaternion(walker.quaternion)));
+      mood.reset();
+    }
   },
 });
 
@@ -245,7 +248,7 @@ renderer.setAnimationLoop(() => {
   }
 
   // 엎드리기: 내려갈 땐 비교적 빨리(약 1.5초), 일어날 땐 천천히(약 4초). 잡아당겨도 그대로.
-  // 녹아내린 채 들어올리면 몸은 금방 펴지고(기분은 그대로), 내려놓으면 다시 녹아내림
+  // 녹아내린 채 들어올리면 몸은 금방 펴짐 (내려놓으면 기분이 처음으로 돌아가 그대로 서 있음)
   const lieTarget = mood.state.lying && !hang.active ? 1 : 0;
   const lieRate = lieTarget ? 0.7 : hang.active ? 1.5 : 0.25;
   anim.lie = THREE.MathUtils.clamp(anim.lie + Math.sign(lieTarget - anim.lie) * dt * lieRate, 0, 1);
