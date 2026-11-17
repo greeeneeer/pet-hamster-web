@@ -6,7 +6,7 @@ import { FLOOR_Y, LEG_PIVOTS, RUMP_CENTERS } from './hamster.js';
 
 const GRAB_R = 0.42;   // 잡은 곳 주변으로 늘어나는 범위
 const MAX_PULL = 0.32; // 이 이상은 잘 안 늘어남
-export const GRABS = 3; // 동시에 잡을 수 있는 곳 (휴대폰에서 손가락 여러 개)
+const GRABS = 3; // 동시에 잡을 수 있는 곳 (휴대폰에서 손가락 여러 개)
 const BREATH_AMP = 0.022;
 
 // 엎드린 자세 (uLie: 0 = 서 있음, 1 = 바닥에 납작 엎드림)

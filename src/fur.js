@@ -13,7 +13,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // back: 등 털끝 색, dark: 등줄기, belly: 배, root: 털 뿌리(안쪽) 색, rootAmt: 뿌리 색이 비치는 정도,
 // bellyShift: 배 쪽 색이 옆구리 위로 올라오는 정도, rootEdge: [뿌리 색이 끝나기 시작하는 높이, 다 끝나는 높이] (털 길이 비율, 좁을수록 경계가 또렷)
-export const COATS = {
+const COATS = {
   golden: { back: '#c98a4b', dark: '#a8692f', belly: '#e6bd85', root: '#7a4a22', rootAmt: 0.25, bellyShift: 0, rootEdge: [0.15, 0.85] },    // 배까지 노란 골든
   robo:   { back: '#977657', dark: '#6b5039', belly: '#f7f3ee', root: '#15110e', rootAmt: 1.0, bellyShift: 0.07, rootEdge: [0.56, 0.66] }, // 로보로스키: 흰 배, 등은 속은 검고 겉은 회갈색
   cream:  { back: '#efd9b8', dark: '#d8b88e', belly: '#fbf3e8', root: '#c9a679', rootAmt: 0.2, bellyShift: 0, rootEdge: [0.15, 0.85] },
