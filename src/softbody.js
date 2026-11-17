@@ -33,17 +33,19 @@ uniform vec4 uLegLift;   // 다리마다 발을 드는 높이
 uniform vec4 uLegSpread; // 다리마다 양옆(바깥쪽)으로 벌리는 각도 (z축 회전, 매달렸을 때)
 uniform float uStand;    // 0: 엉덩이를 바닥에 대고 앉음(뒷다리 숨김), 1: 걸을 때 엉덩이를 들고 섬
 uniform float uNod;      // 고개를 바닥 쪽으로 숙이는 각도 (킁킁거릴 때)
+uniform float uHeadYaw;  // 고개를 좌우로 돌리는 각도 (걸으며 킁킁거릴 때)
 uniform vec2 uHeadStab;  // 걸을 때 몸의 통통(x)·뒤뚱(y, z축 회전)을 머리에서 거꾸로 상쇄해 머리를 고정 (손떨림 방지 카메라처럼)
 const vec3 PIVOT = vec3(${f3(PIVOT.x)}, ${f3(PIVOT.y)}, ${f3(PIVOT.z)});
 float headWeight(vec3 p) { return smoothstep(0.1, 0.55, p.z) * smoothstep(-0.25, 0.1, p.y); }
 vec3 rotX(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c); }
+vec3 rotY(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x * c + v.z * s, v.y, -v.x * s + v.z * c); }
 vec3 posePos(vec3 p, float limb) {
   float L = uLie;
-  if (L < 0.0005 && uNod < 0.0005) return p;
+  if (L < 0.0005 && uNod < 0.0005 && abs(uHeadYaw) < 0.0005) return p;
   float wH = headWeight(p) * (1.0 - limb);
   float wHind = smoothstep(-0.25, -0.55, p.z) * smoothstep(-0.4, -0.55, p.y) * (1.0 - limb);
   float spreadW = smoothstep(0.4, -0.3, p.y);
-  vec3 q = rotX(p - PIVOT, (${f3(HEAD_ANGLE)} * L + uNod) * wH) + PIVOT;
+  vec3 q = rotY(rotX(p - PIVOT, (${f3(HEAD_ANGLE)} * L + uNod) * wH), uHeadYaw * wH) + PIVOT; // 숙이고 나서 좌우로
   q.y -= (${f3(HEAD_DROP)} * L + ${f3(NOD_DROP)} * uNod) * wH;
   q.x *= 1.0 - ${f3(LIMB_PINCH)} * L * limb;   // 앞발 모으기
   q.z -= ${f3(LIMB_TUCK)} * L * limb;          // 몸 밑으로 집어넣기
@@ -54,8 +56,9 @@ vec3 posePos(vec3 p, float limb) {
 }
 vec3 poseNormal(vec3 p, vec3 n, float limb) {
   float L = uLie;
-  if (L < 0.0005 && uNod < 0.0005) return n;
-  n = rotX(n, (${f3(HEAD_ANGLE)} * L + uNod) * headWeight(p) * (1.0 - limb));
+  if (L < 0.0005 && uNod < 0.0005 && abs(uHeadYaw) < 0.0005) return n;
+  float wH = headWeight(p) * (1.0 - limb);
+  n = rotY(rotX(n, (${f3(HEAD_ANGLE)} * L + uNod) * wH), uHeadYaw * wH);
   n.y /= 1.0 - ${f3(FLATTEN)} * L;
   return normalize(n);
 }
@@ -127,19 +130,20 @@ vec3 softPosition(vec3 p, vec3 n) {
 `;
 
 const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-const headWeight = (p) => sm(0.1, 0.55, p.z) * sm(-0.25, 0.1, p.y);
+export const headWeight = (p) => sm(0.1, 0.55, p.z) * sm(-0.25, 0.1, p.y);
 
 // 셰이더의 posePos와 같은 계산 (부품 위치·클릭 판정용)
-export function posePos(p, lie, limb = 0, out = new THREE.Vector3(), nod = 0) {
+export function posePos(p, lie, limb = 0, out = new THREE.Vector3(), nod = 0, yaw = 0) {
   out.copy(p);
-  if (lie < 0.0005 && nod < 0.0005) return out;
+  if (lie < 0.0005 && nod < 0.0005 && Math.abs(yaw) < 0.0005) return out;
   const wH = headWeight(p) * (1 - limb);
   const wHind = sm(-0.25, -0.55, p.z) * sm(-0.4, -0.55, p.y) * (1 - limb);
   const spreadW = sm(0.4, -0.3, p.y);
   out.sub(PIVOT);
   const a = (HEAD_ANGLE * lie + nod) * wH, c = Math.cos(a), s = Math.sin(a);
   const y = out.y * c - out.z * s, z = out.y * s + out.z * c;
-  out.set(out.x, y, z).add(PIVOT);
+  const b = yaw * wH, cy = Math.cos(b), sy = Math.sin(b);
+  out.set(out.x * cy + z * sy, y, -out.x * sy + z * cy).add(PIVOT);
   out.y -= (HEAD_DROP * lie + NOD_DROP * nod) * wH;
   out.x *= 1 - LIMB_PINCH * lie * limb;
   out.z -= LIMB_TUCK * lie * limb;
@@ -188,6 +192,7 @@ export function createSoftBody() {
     uLegSpread: { value: new THREE.Vector4() },
     uStand: { value: 0 },
     uNod: { value: 0 },
+    uHeadYaw: { value: 0 },
     uHeadStab: { value: new THREE.Vector2() },
   };
   // 잡는 곳마다: 잡고 있는지, 끌고 가려는 목표, 놓았을 때 돌아오는 속도

@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { buildBodyGeometry, buildParts, FLOOR_Y, EYE_SCALE } from './hamster.js';
 import { createFur } from './fur.js';
-import { createSoftBody, posePos, poseAngle, walkPos, sitDrop, stabilizeHead, legSpreadAngle } from './softbody.js';
+import { createSoftBody, posePos, poseAngle, headWeight, walkPos, sitDrop, stabilizeHead, legSpreadAngle } from './softbody.js';
 import { createPetting } from './petting.js';
 import { createMood, TANTRUM_TIME } from './mood.js';
 import { createRoamer } from './roam.js';
@@ -99,7 +99,7 @@ const roamer = createRoamer({ roomRadius: ROOM_R });
 const camModes = createCameraModes({ camera, controls, walker, button: document.getElementById('cam') });
 
 // ── 기분 · 입력 ────────────────────────────────────
-const anim = { blink: 0, nextBlink: 2, close: 0, lie: 0 };
+const anim = { blink: 0, nextBlink: 2, close: 0, lie: 0, doze: 0, nextDoze: 8, walkSniff: 0 };
 const mood = createMood({ onTantrum: () => sound.hiss() });
 
 let hover = null, strokeT = 0, squeakedThisGrab = false;
@@ -187,9 +187,9 @@ resize();
 // ── 몸에 붙은 부위들이 걷기·자세·늘어남을 따라가게 ──────
 const tmpV = new THREE.Vector3(), tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpW = new THREE.Vector3();
 const qPose = new THREE.Quaternion(), qWalk = new THREE.Quaternion(), qStab = new THREE.Quaternion(), qTmp = new THREE.Quaternion();
-const X_AXIS = new THREE.Vector3(1, 0, 0), Z_AXIS = new THREE.Vector3(0, 0, 1);
+const X_AXIS = new THREE.Vector3(1, 0, 0), Y_AXIS = new THREE.Vector3(0, 1, 0), Z_AXIS = new THREE.Vector3(0, 0, 1);
 
-function updateParts(lie, nod) {
+function updateParts(lie, nod, yaw) {
   const stand = soft.uniforms.uStand.value;
   for (const obj of partList) {
     const base = obj.userData.base, anchor = obj.userData.anchor ?? base;
@@ -204,8 +204,8 @@ function updateParts(lie, nod) {
       walked = walkPos(anchor, leg, gait.angles, gait.lifts, tmpW, gait.spreads);
       qWalk.setFromAxisAngle(Z_AXIS, legSpreadAngle(leg, gait.spreads)).multiply(qTmp.setFromAxisAngle(X_AXIS, gait.angles[leg]));
     }
-    posePos(walked, lie, limb, tmpA, limb ? 0 : nod);
-    qPose.setFromAxisAngle(X_AXIS, limb ? 0 : poseAngle(walked, lie, nod));
+    posePos(walked, lie, limb, tmpA, limb ? 0 : nod, limb ? 0 : yaw);
+    qPose.setFromAxisAngle(Y_AXIS, limb ? 0 : yaw * headWeight(walked)).multiply(qTmp.setFromAxisAngle(X_AXIS, limb ? 0 : poseAngle(walked, lie, nod)));
     qStab.setFromAxisAngle(Z_AXIS, stabA).multiply(qPose);
     soft.offsetAt(tmpA, tmpV);
     tmpB.copy(anchor).sub(base).applyQuaternion(qStab); // 기준점이 원점이 아닌 부품(입) 보정
@@ -280,9 +280,13 @@ renderer.setAnimationLoop(() => {
   u.uHeadStab.value.set(gait.headBob, gait.headRoll);
   walker.translateZ(gait.speed * turnSlow * dt);
   keepInRoom(walker.position);
-  const nod = Math.max(roam.nod * 0.45, hang.amount * 0.75); // 킁킁거릴 때 고개 숙임, 매달렸을 땐 머리가 푹 처짐
+  // 걸으면서 킁킁: 고개를 살짝 숙이고 좌우로 이리저리 돌리며 냄새를 맡음 (불규칙하게 보이도록 두 흔들림을 섞음)
+  anim.walkSniff = lerp(anim.walkSniff, Math.min(1, gait.stride) * (1 - hang.amount), Math.min(1, dt * 3));
+  const headYaw = anim.walkSniff * (0.3 * Math.sin(t * 1.6) + 0.12 * Math.sin(t * 3.7 + 1.3));
+  const nod = Math.max(roam.nod * 0.45, anim.walkSniff * 0.12, hang.amount * 0.75); // 킁킁거릴 때 고개 숙임, 매달렸을 땐 머리가 푹 처짐
   u.uNod.value = nod;
-  updateParts(lie, nod);
+  u.uHeadYaw.value = headYaw;
+  updateParts(lie, nod, headYaw);
 
   // 성질내기: 입을 빠르게 크게 벌렸다(0.15초) 잠깐 버티고 천천히 닫음. 그동안 고개를 살짝 쳐들고 눈을 찡그림
   const tp = mood.state.tantrum > 0 ? 1 - mood.state.tantrum / TANTRUM_TIME : 1;
@@ -306,15 +310,20 @@ renderer.setAnimationLoop(() => {
   anim.nextBlink -= dt;
   if (anim.nextBlink < 0) { anim.blink = 1; anim.nextBlink = 2.5 + Math.random() * 4; }
   anim.blink = Math.max(0, anim.blink - dt * 8);
-  anim.close = lerp(anim.close, happy > 0.7 || mood.state.lying ? 1 : 0, Math.min(1, dt * 4));
+  // 이따금 졸듯이 눈을 지그시 감음 (앉아 있을 때만. 걷거나 잡혀 있거나 성질낼 땐 깸)
+  const awake = gait.stride > 0.1 || soft.held || hang.active || mood.state.tantrum > 0;
+  anim.nextDoze -= dt;
+  if (anim.nextDoze < 0) { if (!awake) anim.doze = 1.2 + Math.random() * 1.8; anim.nextDoze = 7 + Math.random() * 10; }
+  anim.doze = awake ? 0 : Math.max(0, anim.doze - dt);
+  anim.close = lerp(anim.close, happy > 0.7 || mood.state.lying || anim.doze > 0 ? 1 : 0, Math.min(1, dt * 4));
   const squint = Math.max(happy * 0.6, anim.close, anim.blink, open * 0.75);
   const wide = soft.held ? 1 + Math.min(0.15, stretch * 0.5) * (1 - anim.close) : 1;
   parts.eyes.forEach((e) => e.scale.set(EYE_SCALE.x * wide, EYE_SCALE.y * wide * (1 - squint * 0.94), EYE_SCALE.z));
 
-  // 코 실룩 · 수염: 평소엔 가끔, 바닥을 킁킁거릴 땐 계속
-  const sniff = Math.max(Math.max(0, Math.sin(t * 0.9)) ** 4, roam.sniff);
+  // 코 실룩 · 수염: 평소엔 가끔, 바닥을 킁킁거리거나 걸을 땐 계속
+  const sniff = Math.max(Math.max(0, Math.sin(t * 0.9)) ** 4, roam.sniff, anim.walkSniff * 0.8);
   parts.nose.position.y += Math.sin(t * 30) * 0.006 * sniff; // updateParts가 매 프레임 원위치로 돌려놓으므로 누적되지 않음
-  parts.whiskers.rotation.x = poseAngle(parts.whiskers.userData.base, lie, nod) + Math.sin(t * 30) * 0.03 * sniff;
+  parts.whiskers.quaternion.multiply(qTmp.setFromAxisAngle(X_AXIS, Math.sin(t * 30) * 0.03 * sniff)); // updateParts가 매 프레임 새로 정함
 
   // 귀: 편안하면 뒤로 살짝 눕히고, 성질낼 땐 확 젖힘
   parts.ears.forEach((e) => { e.rotation.x = lerp(e.rotation.x, -happy * 0.5 - open * 0.6, dt * (open > 0 ? 10 : 3)); });
