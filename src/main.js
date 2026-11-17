@@ -85,6 +85,12 @@ function poseHitMesh(lie) {
   hitGeo.computeBoundingSphere();
   hitLie = lie;
 }
+// 잡은 삼각형의 '서 있을 때' 위치 (몸 기준). 엎드려 납작해져도 어느 부위인지 똑같이 판정하려고
+const restPoint = (face) => {
+  const p = new THREE.Vector3(), v = new THREE.Vector3();
+  for (const i of [face.a, face.b, face.c]) p.add(v.fromArray(hitRest, i * 3));
+  return p.multiplyScalar(hitMesh.scale.x / 3);
+};
 
 const stage = createStage(scene, walker);
 const hang = createHang(hanger);
@@ -115,7 +121,7 @@ createPetting({
     grabWorld[slot] = hit.world.clone();
     const local = body.worldToLocal(hit.world.clone());
     soft.grab(slot, local);
-    if (isScruff(local) && hang.slot < 0) hang.grab(slot, walker.worldToLocal(hit.world.clone())); // 목덜미: 들어올리기 후보
+    if (isScruff(restPoint(hit.face)) && hang.slot < 0) hang.grab(slot, walker.worldToLocal(hit.world.clone())); // 목덜미: 들어올리기 후보
     return slot;
   },
   onDrag(p, slot) {
@@ -238,9 +244,11 @@ renderer.setAnimationLoop(() => {
     if (!squeakedThisGrab && stretch > 0.27) { sound.squeak(); squeakedThisGrab = true; }
   }
 
-  // 엎드리기: 내려갈 땐 비교적 빨리(약 1.5초), 일어날 땐 천천히(약 4초). 잡아당겨도 그대로
-  const lieTarget = mood.state.lying ? 1 : 0;
-  anim.lie = THREE.MathUtils.clamp(anim.lie + Math.sign(lieTarget - anim.lie) * dt * (lieTarget ? 0.7 : 0.25), 0, 1);
+  // 엎드리기: 내려갈 땐 비교적 빨리(약 1.5초), 일어날 땐 천천히(약 4초). 잡아당겨도 그대로.
+  // 녹아내린 채 들어올리면 몸은 금방 펴지고(기분은 그대로), 내려놓으면 다시 녹아내림
+  const lieTarget = mood.state.lying && !hang.active ? 1 : 0;
+  const lieRate = lieTarget ? 0.7 : hang.active ? 1.5 : 0.25;
+  anim.lie = THREE.MathUtils.clamp(anim.lie + Math.sign(lieTarget - anim.lie) * dt * lieRate, 0, 1);
   const lie = ease(anim.lie);
   soft.uniforms.uLie.value = lie;
   poseHitMesh(lie);

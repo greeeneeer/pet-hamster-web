@@ -33,7 +33,7 @@ export function createPetting({ canvas, camera, hitMesh, controls, onStroke, onH
     setRay(e);
     const hit = raycaster.intersectObject(hitMesh, false)[0];
     if (!hit) return null;
-    return { world: hit.point, local: hitMesh.worldToLocal(hit.point.clone()), normal: hit.face.normal.clone(), uv: hit.uv.clone() };
+    return { world: hit.point, local: hitMesh.worldToLocal(hit.point.clone()), normal: hit.face.normal.clone(), uv: hit.uv.clone(), face: hit.face };
   }
 
   // 몸 위에서 움직인 만큼 쓰다듬기로 보냄
