@@ -1,10 +1,11 @@
-// 몸이 말랑하게 변하는 부분: 배 쪽 숨쉬기, 잡아당기기와 놓았을 때 부드럽게 돌아오기, 엎드린 자세.
+// 몸이 말랑하게 변하는 부분: 배 쪽 숨쉬기, 잡아당기기(손가락마다 최대 GRABS곳)와 놓았을 때 부드럽게 돌아오기, 엎드린 자세.
 // 같은 계산을 셰이더(몸·털)와 JS(눈·귀 같은 부품 위치)에서 똑같이 쓴다.
 import * as THREE from 'three';
 import { FLOOR_Y } from './hamster.js';
 
 const GRAB_R = 0.42;   // 잡은 곳 주변으로 늘어나는 범위
 const MAX_PULL = 0.32; // 이 이상은 잘 안 늘어남
+export const GRABS = 3; // 동시에 잡을 수 있는 곳 (휴대폰에서 손가락 여러 개)
 const BREATH_AMP = 0.022;
 
 // 엎드린 자세 (uLie: 0 = 서 있음, 1 = 바닥에 납작 엎드림)
@@ -19,8 +20,8 @@ const f3 = (x) => x.toFixed(3);
 
 export const GLSL = /* glsl */ `
 uniform float uBreath;
-uniform vec3 uGrab;
-uniform vec3 uPull;
+uniform vec3 uGrab[${GRABS}];
+uniform vec3 uPull[${GRABS}];
 uniform float uLie;
 const vec3 PIVOT = vec3(${f3(PIVOT.x)}, ${f3(PIVOT.y)}, ${f3(PIVOT.z)});
 float headWeight(vec3 p) { return smoothstep(0.1, 0.55, p.z) * smoothstep(-0.25, 0.1, p.y); }
@@ -53,8 +54,10 @@ float bellyWeight(vec3 p) {
 }
 vec3 softOffset(vec3 p, vec3 n) {
   vec3 o = vec3(n.x, 0.0, n.z * 0.5) * (uBreath * ${BREATH_AMP.toFixed(4)} * bellyWeight(p));
-  vec3 g = p - uGrab;
-  o += uPull * exp(-dot(g, g) / ${(GRAB_R * GRAB_R).toFixed(4)});
+  for (int i = 0; i < ${GRABS}; i++) {
+    vec3 g = p - uGrab[i];
+    o += uPull[i] * exp(-dot(g, g) / ${f3(GRAB_R * GRAB_R)});
+  }
   return o;
 }
 // SOLID: 다리·꼬리 털 메시, TAIL: 꼬리 (엎드릴 때 다리 자세를 따르지 않음)
@@ -99,49 +102,68 @@ export const poseAngle = (p, lie) => HEAD_ANGLE * lie * headWeight(p);
 export function createSoftBody() {
   const uniforms = {
     uBreath: { value: 0 },
-    uGrab: { value: new THREE.Vector3(0, 0, 0) },
-    uPull: { value: new THREE.Vector3() },
+    uGrab: { value: Array.from({ length: GRABS }, () => new THREE.Vector3()) },
+    uPull: { value: Array.from({ length: GRABS }, () => new THREE.Vector3()) },
     uLie: { value: 0 },
   };
-  const vel = new THREE.Vector3();
-  const target = new THREE.Vector3();
-  let held = false;
+  // 잡는 곳마다: 잡고 있는지, 끌고 가려는 목표, 놓았을 때 돌아오는 속도
+  const slots = Array.from({ length: GRABS }, () => ({ held: false, target: new THREE.Vector3(), vel: new THREE.Vector3() }));
 
   const bellyWeight = (p) => { const dz = (p.z + 0.3) / 0.6; return sm(0.05, -0.35, p.y) * Math.exp(-dz * dz); };
 
   return {
     uniforms,
-    get held() { return held; },
-    get stretch() { return uniforms.uPull.value.length(); },
+    get held() { return slots.some((s) => s.held); },
+    get stretch() { return Math.max(...uniforms.uPull.value.map((v) => v.length())); }, // 가장 많이 늘어난 곳
 
-    grab(localPoint) { held = true; uniforms.uGrab.value.copy(localPoint); uniforms.uPull.value.set(0, 0, 0); vel.set(0, 0, 0); target.set(0, 0, 0); },
-    drag(localOffset) {
+    // 비어 있는 자리 번호: 잡고 있지 않은 자리 중 가장 덜 늘어난 곳 (모두 잡고 있으면 -1)
+    freeSlot() {
+      let best = -1;
+      slots.forEach((s, i) => {
+        if (!s.held && (best < 0 || uniforms.uPull.value[i].lengthSq() < uniforms.uPull.value[best].lengthSq())) best = i;
+      });
+      return best;
+    },
+
+    grab(i, localPoint) {
+      const s = slots[i];
+      s.held = true; s.target.set(0, 0, 0); s.vel.set(0, 0, 0);
+      uniforms.uGrab.value[i].copy(localPoint);
+      uniforms.uPull.value[i].set(0, 0, 0);
+    },
+    drag(i, localOffset) {
       // 멀리 당길수록 덜 늘어나게 (부드러운 한계)
       const len = localOffset.length();
-      target.copy(localOffset).multiplyScalar(len > 1e-6 ? (MAX_PULL * Math.tanh(len / MAX_PULL)) / len : 0);
+      slots[i].target.copy(localOffset).multiplyScalar(len > 1e-6 ? (MAX_PULL * Math.tanh(len / MAX_PULL)) / len : 0);
     },
-    release() { held = false; },
+    release(i) { slots[i].held = false; },
 
     update(dt, breath) {
       uniforms.uBreath.value = breath;
-      const pull = uniforms.uPull.value;
-      if (held) {
-        pull.lerp(target, Math.min(1, dt * 12));
-        vel.set(0, 0, 0);
-      } else {
-        // 출렁이지 않고 부드럽게 제자리로 (임계 감쇠)
-        const w = 7, steps = 4, h = dt / steps;
-        for (let i = 0; i < steps; i++) {
-          vel.addScaledVector(pull, -w * w * h).addScaledVector(vel, -2 * w * h);
-          pull.addScaledVector(vel, h);
+      slots.forEach((s, i) => {
+        const pull = uniforms.uPull.value[i];
+        if (s.held) {
+          pull.lerp(s.target, Math.min(1, dt * 12));
+          s.vel.set(0, 0, 0);
+        } else {
+          // 출렁이지 않고 부드럽게 제자리로 (임계 감쇠)
+          const w = 7, steps = 4, h = dt / steps;
+          for (let k = 0; k < steps; k++) {
+            s.vel.addScaledVector(pull, -w * w * h).addScaledVector(s.vel, -2 * w * h);
+            pull.addScaledVector(s.vel, h);
+          }
+          if (pull.lengthSq() < 1e-8) pull.set(0, 0, 0);
         }
-      }
+      });
     },
 
     // 부품(눈·귀 등)이 몸과 함께 움직이도록 같은 변형을 JS로 계산
     offsetAt(p, out = new THREE.Vector3()) {
-      const g = p.distanceToSquared(uniforms.uGrab.value);
-      out.copy(uniforms.uPull.value).multiplyScalar(Math.exp(-g / (GRAB_R * GRAB_R)));
+      out.set(0, 0, 0);
+      for (let i = 0; i < GRABS; i++) {
+        const g = p.distanceToSquared(uniforms.uGrab.value[i]);
+        out.addScaledVector(uniforms.uPull.value[i], Math.exp(-g / (GRAB_R * GRAB_R)));
+      }
       // 숨쉬기: 셰이더는 법선 방향으로 부풀리지만, 부품은 몸 중심에서 바깥쪽으로 근사
       const b = uniforms.uBreath.value * BREATH_AMP * bellyWeight(p);
       const r = Math.hypot(p.x, p.z) || 1;

@@ -89,7 +89,8 @@ scene.add(shadow);
 const anim = { blink: 0, nextBlink: 2, close: 0, lie: 0 };
 const mood = createMood();
 
-let hover = null, strokeT = 0, grabWorld = null, squeakedThisGrab = false;
+let hover = null, strokeT = 0, squeakedThisGrab = false;
+const grabWorld = []; // 잡은 자리마다 처음 잡은 점 (월드 좌표)
 createPetting({
   canvas, camera, hitMesh, controls,
   onHover(hit) { hover = hit; fur.setTouch(hit?.local ?? null, hit ? 0.5 : 0); },
@@ -99,16 +100,19 @@ createPetting({
     mood.stroke(s);
   },
   onGrab(hit) {
+    const slot = soft.freeSlot();
+    if (slot < 0) return -1;              // 이미 최대 개수만큼 잡고 있음
     sound.unlock();
-    grabWorld = hit.world.clone();
-    soft.grab(body.worldToLocal(hit.world.clone()));
-    squeakedThisGrab = false;
+    if (!soft.held) squeakedThisGrab = false;
+    grabWorld[slot] = hit.world.clone();
+    soft.grab(slot, body.worldToLocal(hit.world.clone()));
+    return slot;
   },
-  onDrag(p) {
-    const offset = body.worldToLocal(p.clone()).sub(body.worldToLocal(grabWorld.clone()));
-    soft.drag(offset);
+  onDrag(p, slot) {
+    const offset = body.worldToLocal(p.clone()).sub(body.worldToLocal(grabWorld[slot].clone()));
+    soft.drag(slot, offset);
   },
-  onRelease() { soft.release(); grabWorld = null; },
+  onRelease(slot) { soft.release(slot); },
 });
 
 // ── UI ─────────────────────────────────────────────
