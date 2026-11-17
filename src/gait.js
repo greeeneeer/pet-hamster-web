@@ -5,8 +5,8 @@
 // - 머리는 몸의 흔들림 대부분을 거꾸로 상쇄해 거의 고정 (완전히 멈추면 어색해서 조금은 따라감)
 // 다리 번호: 0·1 앞다리(왼·오른), 2·3 뒷다리(왼·오른)
 
-export const WALK_SPEED = 0.5;   // 보통 걷는 속도 (몸 길이 단위/초)
-const STEP_HZ = 2.2;              // 걸음 빠르기 (보통 속도일 때 1초에 몇 걸음 주기)
+export const WALK_SPEED = 0.65;  // 보통 걷는 속도 (몸 길이 단위/초)
+const STEP_HZ = 1.9;              // 걸음 빠르기 (보통 속도일 때 1초에 몇 걸음 주기)
 const LEG_SWING = 0.38;           // 다리를 앞뒤로 흔드는 최대 각도
 const FOOT_LIFT = 0.05;           // 발을 드는 최대 높이
 const LEG_PHASE = [0, Math.PI, Math.PI, 0];

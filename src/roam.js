@@ -10,7 +10,7 @@
 //   speed: 걷는 속도(0이면 멈춤), faceTo: 바라볼 바닥 위 점(없으면 null), nod: 고개 숙임 정도(0~1), sniff: 코 실룩임(0~1)
 import * as THREE from 'three';
 
-const WANDER_SPEED = 0.5, FOLLOW_SPEED = 0.75;
+const WANDER_SPEED = 0.65, FOLLOW_SPEED = 0.95;
 const ARRIVE_DIST = 0.3, FOLLOW_STOP = 0.9;   // 목표에 도착했다고 보는 거리, 마우스 앞에서 멈추는 거리
 const MOUSE_FRESH = 1.5;                       // 마우스가 멈춘 뒤 이 시간(초)까지는 계속 따라감
 const rand = (a, b) => a + Math.random() * (b - a);
