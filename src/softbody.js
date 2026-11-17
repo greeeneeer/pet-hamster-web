@@ -30,6 +30,7 @@ uniform vec3 uPull[${GRABS}];
 uniform float uLie;
 uniform vec4 uLegAngle;  // 다리마다 앞뒤로 흔드는 각도 (x축 회전)
 uniform vec4 uLegLift;   // 다리마다 발을 드는 높이
+uniform vec4 uLegSpread; // 다리마다 양옆(바깥쪽)으로 벌리는 각도 (z축 회전, 매달렸을 때)
 uniform float uStand;    // 0: 엉덩이를 바닥에 대고 앉음(뒷다리 숨김), 1: 걸을 때 엉덩이를 들고 섬
 uniform float uNod;      // 고개를 바닥 쪽으로 숙이는 각도 (킁킁거릴 때)
 uniform vec2 uHeadStab;  // 걸을 때 몸의 통통(x)·뒤뚱(y, z축 회전)을 머리에서 거꾸로 상쇄해 머리를 고정 (손떨림 방지 카메라처럼)
@@ -79,7 +80,9 @@ vec3 walkPos(vec3 p) {
   if (aLeg < -0.5) return p + sit;   // 꼬리는 엉덩이를 따라 내려감
   int i = int(aLeg + 0.5);
   vec3 pv = legPivot(i);
-  vec3 q = rotX(p - pv, uLegAngle[i]) + pv;
+  vec3 q = rotX(p - pv, uLegAngle[i]);
+  float sa = uLegSpread[i] * sign(pv.x), sc = cos(sa), ss = sin(sa);      // 바깥쪽으로 벌리기
+  q = vec3(q.x * sc - q.y * ss, q.x * ss + q.y * sc, q.z) + pv;
   q.y += uLegLift[i] * smoothstep(pv.y, ${f3(FLOOR_Y)}, p.y);
   return q;
 #else
@@ -160,13 +163,19 @@ export function stabilizeHead(p, bob, roll, out) {
 export const sitDrop = (p, stand, lie) => -SIT_DROP * (1 - stand) * (1 - lie) * sm(-0.25, -0.75, p.z) * sm(0.35, -0.45, p.y);
 
 // 셰이더의 walkPos와 같은 계산 (다리에 붙은 발 부품용). 돌린 각도도 돌려줌
-export function walkPos(p, leg, angles, lifts, out = new THREE.Vector3()) {
+export function walkPos(p, leg, angles, lifts, out = new THREE.Vector3(), spreads = null) {
   const pv = LEG_PIVOTS[leg], a = angles[leg], c = Math.cos(a), s = Math.sin(a);
-  const y = p.y - pv.y, z = p.z - pv.z;
-  out.set(p.x, pv.y + y * c - z * s, pv.z + y * s + z * c);
+  const x0 = p.x - pv.x, y = p.y - pv.y, z = p.z - pv.z;
+  let x = x0, y1 = y * c - z * s;
+  const z1 = y * s + z * c;
+  const sa = (spreads ? spreads[leg] : 0) * Math.sign(pv.x), sc = Math.cos(sa), ss = Math.sin(sa); // 바깥쪽으로 벌리기
+  [x, y1] = [x * sc - y1 * ss, x * ss + y1 * sc];
+  out.set(pv.x + x, pv.y + y1, pv.z + z1);
   out.y += lifts[leg] * sm(pv.y, FLOOR_Y, p.y);
   return out;
 }
+// 다리를 바깥쪽으로 벌린 각도 (부품 회전용, z축)
+export const legSpreadAngle = (leg, spreads) => spreads[leg] * Math.sign(LEG_PIVOTS[leg].x);
 
 export function createSoftBody() {
   const uniforms = {
@@ -176,6 +185,7 @@ export function createSoftBody() {
     uLie: { value: 0 },
     uLegAngle: { value: new THREE.Vector4() },
     uLegLift: { value: new THREE.Vector4() },
+    uLegSpread: { value: new THREE.Vector4() },
     uStand: { value: 0 },
     uNod: { value: 0 },
     uHeadStab: { value: new THREE.Vector2() },

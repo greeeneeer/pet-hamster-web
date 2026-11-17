@@ -55,6 +55,7 @@ export function createMood({ onTantrum } = {}) {
     },
     text() {
       if (s.tantrum > 0) return '캬악!';
+      if (s.hanging) return '대롱대롱…';
       if (s.held) return s.annoyed > 0.4 ? '으앗, 늘어나요!' : '쭈욱…';
       if (s.annoyed > 0.6) return '끙…';
       if (s.lying) return '녹아내려요…';
