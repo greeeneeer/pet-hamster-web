@@ -2,8 +2,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { buildBodyGeometry, buildFace, FLOOR_Y, EYE_SCALE } from './hamster.js';
-import { createFur, COATS } from './fur.js';
+import { buildBodyGeometry, buildParts, FLOOR_Y, EYE_SCALE } from './hamster.js';
+import { createFur } from './fur.js';
 import { createSoftBody, posePos, poseAngle } from './softbody.js';
 import { createPetting } from './petting.js';
 import { createMood } from './mood.js';
@@ -37,20 +37,19 @@ controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MO
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }; // 한 손가락: 햄스터 밖이면 돌려보기(petting.js가 조절), 두 손가락: 확대·축소 (이동은 꺼져 있음)
 
 // ── 햄스터 ─────────────────────────────────────────
-// hamster(바닥 위치) → body(고개 돌리기·숨쉬기) → 털, 얼굴, 클릭 판정용 메시
-const hamster = new THREE.Group();
+// body(고개 돌리기) 안에 털 메시들, 몸에 붙는 부위들, 클릭 판정용 메시가 들어간다.
 const body = new THREE.Group();
-hamster.add(body);
-scene.add(hamster);
+scene.add(body);
 
 const bodyGeo = buildBodyGeometry();
-const face = buildFace();
+const parts = buildParts();
 const soft = createSoftBody();
-const fur = createFur(bodyGeo, face.anchors, soft);
+const fur = createFur(bodyGeo, parts.anchors, soft);
+const partList = parts.group.children;
 body.add(
-  fur.mesh, face.parts,
-  fur.addLimbFur(face.parts.children.filter((o) => o.userData.limb)),
-  fur.addLimbFur(face.parts.children.filter((o) => o.userData.tail), { furScale: 0.6, tail: true }), // 꼬리: 더 짧은 흰 털
+  fur.mesh, parts.group,
+  fur.addLimbFur(partList.filter((o) => o.userData.limb)),
+  fur.addLimbFur(partList.filter((o) => o.userData.tail), { furScale: 0.6, tail: true }), // 꼬리: 더 짧은 흰 털
 );
 
 // 클릭 판정용 메시: 엎드린 자세를 CPU에서 따로 적용하므로 형태를 복사해 씀
@@ -98,7 +97,6 @@ createPetting({
     strokeT = 0.3;
     fur.comb(s.uv, s.dir, Math.min(1, 0.25 + s.dist * 6), s.local);
     mood.stroke(s);
-    sound.rustle(s.speed);
   },
   onGrab(hit) {
     sound.unlock();
@@ -119,7 +117,6 @@ document.getElementById('coats').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-coat]'); if (!b) return;
   document.querySelectorAll('#coats button').forEach((x) => x.classList.toggle('on', x === b));
   fur.setCoat(b.dataset.coat);
-  face.limbMat.color.set(COATS[b.dataset.coat].belly); // 앞다리는 배 색
 });
 document.getElementById('sound').addEventListener('click', (e) => {
   e.currentTarget.textContent = sound.toggle() ? '🔈' : '🔇';
@@ -184,7 +181,7 @@ renderer.setAnimationLoop(() => {
   soft.update(dt, Math.sin(t * rate));
 
   // 몸에 붙은 부품들도 자세·늘어남을 따라감
-  for (const obj of face.parts.children) {
+  for (const obj of partList) {
     const base = obj.userData.base, anchor = obj.userData.anchor ?? base;
     const limb = obj.userData.hand ? 1 : 0;
     posePos(anchor, lie, limb, tmpA);
@@ -202,24 +199,23 @@ renderer.setAnimationLoop(() => {
   const still = soft.held || anim.lie > 0.05 ? 0 : mood.state.petting ? 0.5 : 2.5;
   body.rotation.y = lerp(body.rotation.y, yaw, dt * still);
 
-  // 눈 깜빡임 + 기분 좋으면 실눈, 잡혀 있으면 동그랗게
+  // 눈: 깜빡임, 기분이 좋을수록 실눈, '너무 좋아요…'·엎드림에서는 감음
   anim.nextBlink -= dt;
   if (anim.nextBlink < 0) { anim.blink = 1; anim.nextBlink = 2.5 + Math.random() * 4; }
   anim.blink = Math.max(0, anim.blink - dt * 8);
-  // '너무 좋아요…' 단계(happy > 0.7)에서는 눈을 완전히 감음
-  // 잡아당겨도 기분은 그대로: 감은 눈은 감은 채로, 그 외에는 늘어나는 만큼 눈이 살짝 커짐
+  // 잡아당겨도 감은 눈은 감은 채로, 뜬 눈은 늘어나는 만큼 살짝 커짐
   anim.close = lerp(anim.close, happy > 0.7 || mood.state.lying ? 1 : 0, Math.min(1, dt * 4));
   const squint = Math.max(happy * 0.6, anim.close, anim.blink);
   const wide = soft.held ? 1 + Math.min(0.15, stretch * 0.5) * (1 - anim.close) : 1;
-  face.eyes.forEach((e) => e.scale.set(EYE_SCALE.x * wide, EYE_SCALE.y * wide * (1 - squint * 0.94), EYE_SCALE.z));
+  parts.eyes.forEach((e) => e.scale.set(EYE_SCALE.x * wide, EYE_SCALE.y * wide * (1 - squint * 0.94), EYE_SCALE.z));
 
   // 코 실룩 · 수염
   const sniff = Math.max(0, Math.sin(t * 0.9)) ** 4;
-  face.nose.position.y += Math.sin(t * 30) * 0.006 * sniff; // 위에서 매 프레임 원위치로 돌려놓으므로 누적되지 않음
-  face.whiskers.rotation.x = poseAngle(face.whiskers.userData.base, lie) + Math.sin(t * 30) * 0.03 * sniff;
+  parts.nose.position.y += Math.sin(t * 30) * 0.006 * sniff; // 위에서 매 프레임 원위치로 돌려놓으므로 누적되지 않음
+  parts.whiskers.rotation.x = poseAngle(parts.whiskers.userData.base, lie) + Math.sin(t * 30) * 0.03 * sniff;
 
   // 귀: 편안하면 뒤로 살짝 눕힘
-  face.ears.forEach((e) => { e.rotation.x = lerp(e.rotation.x, -happy * 0.5, dt * 3); });
+  parts.ears.forEach((e) => { e.rotation.x = lerp(e.rotation.x, -happy * 0.5, dt * 3); });
 
   moodTextT -= dt;
   if (moodTextT < 0) { moodEl.textContent = mood.text(); moodTextT = 0.2; }

@@ -1,5 +1,4 @@
-// 소리 (Web Audio로 합성, 음원 파일 없음).
-// 골조 단계: 놀랐을 때 찍찍 소리만. 털 스치는 소리는 다음 단계에서.
+// 소리 (Web Audio로 합성, 음원 파일 없음). 많이 잡아당겼을 때 찍찍 소리.
 let ctx = null;
 let enabled = true;
 
@@ -22,5 +21,4 @@ export const sound = {
       o.start(s); o.stop(s + 0.1);
     }
   },
-  rustle(speed) {}, // 털 스치는 소리 (다음 단계)
 };

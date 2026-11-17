@@ -1,6 +1,6 @@
-// 햄스터 몸 모양과 얼굴 부품(눈·귀·코·입·수염·다리). +z 방향이 얼굴이다.
+// 햄스터 몸 모양과 몸에 붙는 부위(눈·귀·코·입·수염·다리·꼬리). +z 방향이 얼굴이다.
 //
-// 몸은 덩어리 여러 개(몸통, 높이 든 머리, 주둥이, 볼)를 부드럽게 이어 붙인 모양이다.
+// 몸은 덩어리 여러 개(몸통, 높이 든 머리, 가슴, 콧등, 주둥이)를 부드럽게 이어 붙인 모양이다.
 // 덩어리 사이가 매끄럽게 메워지면서 조랭이떡처럼 완만하게 잘록한 목이 생긴다.
 // (각 덩어리를 거리 함수로 두고 smooth-min으로 합친 뒤, 구의 꼭짓점을 그 표면으로 옮긴다)
 import * as THREE from 'three';
@@ -9,10 +9,10 @@ const V3 = THREE.Vector3;
 
 export const FLOOR_Y = -0.57;
 const BOTTOM_Y = -0.52;            // 몸통 바닥(납작한 면)
-export const EYE_SCALE = new V3(0.92, 1.02, 1);
+export const EYE_SCALE = new V3(0.92, 1.02, 1); // 눈 모양 (거의 동그랗게)
 
 // 덩어리: 중심 c, 반지름 r (x 너비, y 높이, z 길이)
-export const SHAPE = {
+const SHAPE = {
   body:  { c: new V3(0, 0.0, -0.34),  r: new V3(0.7, 0.64, 0.8) },   // 엉덩이까지 둥근 몸통
   head:  { c: new V3(0, 0.42, 0.56),  r: new V3(0.5, 0.47, 0.5) },   // 높이 든 머리
   chest: { c: new V3(0, -0.12, 0.26), r: new V3(0.36, 0.28, 0.32) },  // 머리 아래 가슴 (작게)
@@ -28,7 +28,7 @@ function ell(px, py, pz, { c, r }) {
 function smin(a, b, k) { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }
 
 // 표면까지의 (대략적) 거리: 안쪽이 음수
-export function sdf(x, y, z) {
+function sdf(x, y, z) {
   let d = smin(ell(x, y, z, SHAPE.body), ell(x, y, z, SHAPE.head), BLEND.neck);
   d = smin(d, ell(x, y, z, SHAPE.chest), BLEND.chest);
   d = smin(d, ell(x, y, z, SHAPE.bridge), BLEND.bridge);
@@ -36,7 +36,7 @@ export function sdf(x, y, z) {
   return -smin(-d, -(BOTTOM_Y - y), BLEND.bottom); // 바닥은 납작하게 잘라냄
 }
 
-export function normalAt(p) {
+function normalAt(p) {
   const e = 1e-3;
   return new V3(
     sdf(p.x + e, p.y, p.z) - sdf(p.x - e, p.y, p.z),
@@ -46,7 +46,7 @@ export function normalAt(p) {
 }
 
 // origin에서 dir 방향으로 나가다가 처음 표면을 벗어나는 점
-export function castOut(origin, dir) {
+function castOut(origin, dir) {
   const step = 0.02;
   let t = 0;
   const at = (s) => sdf(origin.x + dir.x * s, origin.y + dir.y * s, origin.z + dir.z * s);
@@ -56,7 +56,8 @@ export function castOut(origin, dir) {
   return origin.clone().addScaledVector(dir, (lo + hi) / 2);
 }
 
-const CENTER = new V3(0, 0.15, 0.1); // 몸 전체를 펼칠 기준점 (머리·몸통 모두 이 점에서 보임)
+// 몸 전체를 펼칠 기준점 (머리·몸통 모두 이 점에서 보임). 몸 UV는 이 점을 중심으로 한 구의 UV다.
+export const CENTER = new V3(0, 0.15, 0.1);
 
 // 특정 덩어리 중심에서 방향을 정해 표면 위의 점과 법선을 얻음 (얼굴 부품 배치용)
 function surfFrom(part, x, y, z) {
@@ -125,7 +126,6 @@ function earGeometry() {
   return g;
 }
 
-// 두 점 사이를 잇는 캡슐 (다리용)
 // 위(a)는 굵고 아래(b)로 갈수록 가늘어지는 다리. 끝은 둥글게 막음.
 function limb(a, b, rTop, rBottom, material) {
   const len = a.distanceTo(b);
@@ -178,9 +178,10 @@ export function buildBodyGeometry() {
   return geo;
 }
 
-// 얼굴 부품. 털 셰이더가 눈·코 주변 털을 짧게 하려고 위치(anchors)를 쓴다.
-export function buildFace() {
-  const parts = new THREE.Group();
+// 몸에 붙는 부위들. 털 셰이더가 눈·코·입 주변 털을 짧게 하려고 위치(anchors)를 쓴다.
+// 다리와 꼬리는 모양만 만들고, 털은 fur.addLimbFur가 입힌다(원래 메시는 숨김).
+export function buildParts() {
+  const group = new THREE.Group();
   const anchors = {};
 
   // 눈
@@ -192,8 +193,8 @@ export function buildFace() {
     const eye = new THREE.Mesh(eyeGeo, eyeMat);
     eye.position.copy(p).addScaledVector(n, 0.004); // 얼굴 속에 조금 묻히게
     eye.lookAt(eye.position.clone().add(n));
-    eye.scale.copy(EYE_SCALE); // 세로로 긴 눈
-    parts.add(eye); eyes.push(eye);
+    eye.scale.copy(EYE_SCALE);
+    group.add(eye); eyes.push(eye);
     anchors[s > 0 ? 'eyeL' : 'eyeR'] = p.clone();
   }
 
@@ -217,7 +218,7 @@ export function buildFace() {
     inner.position.y = outer.position.y = -0.015;               // 밑동은 몸에 묻히게
     pivot.add(inner, outer);
     ear.add(pivot);
-    parts.add(ear); ears.push(pivot);
+    group.add(ear); ears.push(pivot);
   }
 
   // 코
@@ -229,7 +230,7 @@ export function buildFace() {
   );
   nose.scale.set(1, 0.75, 0.7);
   nose.position.copy(np).addScaledVector(nn, 0.01);
-  parts.add(nose);
+  group.add(nose);
 
   // 수염
   const whiskers = new THREE.Group();
@@ -247,30 +248,30 @@ export function buildFace() {
       whiskers.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(12)), wMat));
     }
   }
-  parts.add(whiskers);
+  group.add(whiskers);
 
   const mouth = buildMouth();
-  parts.add(mouth);
+  group.add(mouth);
   anchors.mouth = surfFrom('snout', 0, -0.55, 1).p;
   mouth.userData.anchor = anchors.mouth; // 자식들이 몸 좌표로 놓여 있으므로 변형은 이 점 기준
 
   // 다리: 사진처럼 들린 머리·가슴 아래로 앞다리가 비스듬히 내려와 분홍 손으로 바닥을 짚음.
   // 뒷다리는 엉덩이에 묻혀 있고 긴 분홍 뒷발만 살짝 보임.
-  const limbMat = new THREE.MeshStandardMaterial({ color: 0xf3e6d3, roughness: 0.9 }); // 배 색을 따라감
+  const hiddenMat = new THREE.MeshBasicMaterial(); // 털 메시로 대체되어 화면에는 안 그려짐
   const pawMat = new THREE.MeshStandardMaterial({ color: 0xe8868a, roughness: 0.55 });
   for (const s of [1, -1]) {
     const wrist = new V3(0.14 * s, FLOOR_Y + 0.05, 0.6);
-    parts.add(limb(new V3(0.24 * s, -0.22, 0.38), wrist, 0.14, 0.062, limbMat)); // 몸 옆에서 굵게 내려옴
+    group.add(limb(new V3(0.24 * s, -0.22, 0.38), wrist, 0.14, 0.062, hiddenMat)); // 몸 옆에서 굵게 내려옴
     const hand = paw({ palm: new V3(0.037, 0.017, 0.038), fingers: 4, fingerLen: 0.042, fingerR: 0.009, spread: 0.9, curl: 0.45 }, pawMat);
     hand.position.set(wrist.x, FLOOR_Y + 0.014, wrist.z);
     hand.rotation.y = -0.12 * s;
-    hand.userData.hand = true; // 엎드릴 때 앞다리와 같이 모이고 앞으로 나감
-    parts.add(hand);
+    hand.userData.hand = true; // 엎드리면 앞다리와 같이 몸 밑으로 들어가고 숨겨짐
+    group.add(hand);
 
     const hind = paw({ palm: new V3(0.034, 0.016, 0.07), fingers: 5, fingerLen: 0.03, fingerR: 0.0065, spread: 1.0, curl: 0.35 }, pawMat);
     hind.position.set(0.34 * s, FLOOR_Y + 0.016, -0.62);
     hind.rotation.y = 0.12 * s;
-    parts.add(hind);
+    group.add(hind);
   }
 
   // 꼬리: 엉덩이 뒤쪽 아래에서 살짝 나온 아주 짧고 뭉툭한 꼬리
@@ -281,22 +282,21 @@ export function buildFace() {
     tail.position.copy(p);
     tail.quaternion.setFromUnitVectors(new V3(0, 1, 0), dir);
     // 짧은 원기둥 + 납작하게 누른 반구 끝 = 뭉툭한 꼬리. 짧은 흰 털을 입힘 (fur.addLimbFur)
-    const tailMat = new THREE.MeshStandardMaterial({ color: 0xf3e6d3, roughness: 0.9 });
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.042, 0.08, 16, 1, true), tailMat);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.042, 0.08, 16, 1, true), hiddenMat);
     shaft.position.y = 0.04;
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.036, 16, 10), tailMat);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.036, 16, 10), hiddenMat);
     tip.scale.set(1, 0.5, 1);                                      // 끝을 납작하게 눌러 뭉툭하게
     tip.position.y = 0.08;
     tail.add(shaft, tip);
     tail.userData.tail = true;
-    parts.add(tail);
+    group.add(tail);
   }
 
   // 몸이 늘어나거나 숨쉴 때 함께 움직일 부품들의 원래 위치 기록
-  for (const obj of parts.children) {
+  for (const obj of group.children) {
     obj.userData.base = obj.position.clone();
     obj.userData.baseQuat = obj.quaternion.clone();
   }
 
-  return { parts, eyes, ears, nose, whiskers, mouth, anchors, limbMat };
+  return { group, eyes, ears, nose, whiskers, anchors };
 }

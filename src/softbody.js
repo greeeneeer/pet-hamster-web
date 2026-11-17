@@ -14,13 +14,15 @@ const BREATH_AMP = 0.022;
 //  - 전체: 바닥 쪽으로 납작하게 눌리며 옆으로 퍼짐
 const PIVOT = new THREE.Vector3(0, 0.1, 0.25);
 const HEAD_ANGLE = 0.5, HEAD_DROP = 0.12, FLATTEN = 0.38, SPREAD = 0.16;
+const LIMB_PINCH = 0.45, LIMB_TUCK = 0.12, HIND_STRETCH = 0.22; // 앞다리 모으기·집어넣기, 뒷발 뻗기
+const f3 = (x) => x.toFixed(3);
 
 export const GLSL = /* glsl */ `
 uniform float uBreath;
 uniform vec3 uGrab;
 uniform vec3 uPull;
 uniform float uLie;
-const vec3 PIVOT = vec3(${PIVOT.x.toFixed(3)}, ${PIVOT.y.toFixed(3)}, ${PIVOT.z.toFixed(3)});
+const vec3 PIVOT = vec3(${f3(PIVOT.x)}, ${f3(PIVOT.y)}, ${f3(PIVOT.z)});
 float headWeight(vec3 p) { return smoothstep(0.1, 0.55, p.z) * smoothstep(-0.25, 0.1, p.y); }
 vec3 rotX(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c); }
 vec3 posePos(vec3 p, float limb) {
@@ -29,20 +31,20 @@ vec3 posePos(vec3 p, float limb) {
   float wH = headWeight(p) * (1.0 - limb);
   float wHind = smoothstep(-0.25, -0.55, p.z) * smoothstep(-0.4, -0.55, p.y) * (1.0 - limb);
   float spreadW = smoothstep(0.4, -0.3, p.y);
-  vec3 q = rotX(p - PIVOT, ${HEAD_ANGLE.toFixed(3)} * L * wH) + PIVOT;
-  q.y -= ${HEAD_DROP.toFixed(3)} * L * wH;
-  q.x *= 1.0 - 0.45 * L * limb;           // 앞발 모으기
-  q.z -= 0.12 * L * limb;                  // 몸 밑으로 집어넣기 (엎드리면 앞발은 안 보임)
-  q.z -= 0.22 * L * wHind;                 // 뒷발 뒤로
-  q.x *= 1.0 + ${SPREAD.toFixed(3)} * L * spreadW;
-  q.y = ${FLOOR_Y.toFixed(3)} + (q.y - ${FLOOR_Y.toFixed(3)}) * (1.0 - ${FLATTEN.toFixed(3)} * L);
+  vec3 q = rotX(p - PIVOT, ${f3(HEAD_ANGLE)} * L * wH) + PIVOT;
+  q.y -= ${f3(HEAD_DROP)} * L * wH;
+  q.x *= 1.0 - ${f3(LIMB_PINCH)} * L * limb;   // 앞발 모으기
+  q.z -= ${f3(LIMB_TUCK)} * L * limb;          // 몸 밑으로 집어넣기
+  q.z -= ${f3(HIND_STRETCH)} * L * wHind;      // 뒷발 뒤로
+  q.x *= 1.0 + ${f3(SPREAD)} * L * spreadW;
+  q.y = ${f3(FLOOR_Y)} + (q.y - ${f3(FLOOR_Y)}) * (1.0 - ${f3(FLATTEN)} * L);
   return q;
 }
 vec3 poseNormal(vec3 p, vec3 n, float limb) {
   float L = uLie;
   if (L < 0.0005) return n;
-  n = rotX(n, ${HEAD_ANGLE.toFixed(3)} * L * headWeight(p) * (1.0 - limb));
-  n.y /= 1.0 - ${FLATTEN.toFixed(3)} * L;
+  n = rotX(n, ${f3(HEAD_ANGLE)} * L * headWeight(p) * (1.0 - limb));
+  n.y /= 1.0 - ${f3(FLATTEN)} * L;
   return normalize(n);
 }
 float bellyWeight(vec3 p) {
@@ -55,6 +57,7 @@ vec3 softOffset(vec3 p, vec3 n) {
   o += uPull * exp(-dot(g, g) / ${(GRAB_R * GRAB_R).toFixed(4)});
   return o;
 }
+// SOLID: 다리·꼬리 털 메시, TAIL: 꼬리 (엎드릴 때 다리 자세를 따르지 않음)
 #if defined(SOLID) && !defined(TAIL)
 const float LIMB = 1.0;
 #else
@@ -63,7 +66,7 @@ const float LIMB = 0.0;
 vec3 softPosition(vec3 p, vec3 n) {
   vec3 pp = posePos(p, LIMB);
   vec3 q = pp + softOffset(pp, n);
-  q.y = max(q.y, min(pp.y, ${(FLOOR_Y + 0.02).toFixed(3)}));
+  q.y = max(q.y, min(pp.y, ${f3(FLOOR_Y + 0.02)}));
   return q;
 }
 `;
@@ -83,9 +86,9 @@ export function posePos(p, lie, limb = 0, out = new THREE.Vector3()) {
   const y = out.y * c - out.z * s, z = out.y * s + out.z * c;
   out.set(out.x, y, z).add(PIVOT);
   out.y -= HEAD_DROP * lie * wH;
-  out.x *= 1 - 0.45 * lie * limb;
-  out.z -= 0.12 * lie * limb;
-  out.z -= 0.22 * lie * wHind;
+  out.x *= 1 - LIMB_PINCH * lie * limb;
+  out.z -= LIMB_TUCK * lie * limb;
+  out.z -= HIND_STRETCH * lie * wHind;
   out.x *= 1 + SPREAD * lie * spreadW;
   out.y = FLOOR_Y + (out.y - FLOOR_Y) * (1 - FLATTEN * lie);
   return out;
@@ -104,7 +107,7 @@ export function createSoftBody() {
   const target = new THREE.Vector3();
   let held = false;
 
-  const bellyWeight = (p) => { const dz = (p.z + 0.3) / 0.6; const t = Math.min(1, Math.max(0, (0.05 - p.y) / 0.4)); return t * t * (3 - 2 * t) * Math.exp(-dz * dz); };
+  const bellyWeight = (p) => { const dz = (p.z + 0.3) / 0.6; return sm(0.05, -0.35, p.y) * Math.exp(-dz * dz); };
 
   return {
     uniforms,
@@ -139,6 +142,7 @@ export function createSoftBody() {
     offsetAt(p, out = new THREE.Vector3()) {
       const g = p.distanceToSquared(uniforms.uGrab.value);
       out.copy(uniforms.uPull.value).multiplyScalar(Math.exp(-g / (GRAB_R * GRAB_R)));
+      // 숨쉬기: 셰이더는 법선 방향으로 부풀리지만, 부품은 몸 중심에서 바깥쪽으로 근사
       const b = uniforms.uBreath.value * BREATH_AMP * bellyWeight(p);
       const r = Math.hypot(p.x, p.z) || 1;
       out.x += (p.x / r) * b; out.z += (p.z / r) * b * 0.5;

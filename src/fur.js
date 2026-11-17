@@ -4,9 +4,11 @@
 //
 // - 털 결: 기본은 코 → 엉덩이 방향. 쓰다듬은 방향은 comb 텍스처(UV 공간)에 기록되고 천천히 복원된다.
 // - 손이 닿은 곳은 털이 눌린다(setTouch).
-// - 색은 몸 좌표로 칠한 무늬(등·배·턱 밑·주둥이·엉덩이 아래)를 쓴다.
+// - 색은 몸 좌표로 칠한 무늬(등·배·턱 밑·주둥이·엉덩이 아래)에, 털 뿌리 색(털 색마다 다름)을 더한다.
+// - 다리·꼬리는 addLimbFur로 같은 털(배 색, 짧은 털)을 입힌다.
 import * as THREE from 'three';
 import { GLSL as SOFT_GLSL } from './softbody.js';
+import { CENTER } from './hamster.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // back: 등 털끝 색, dark: 등줄기, belly: 배, root: 털 뿌리(안쪽) 색, rootAmt: 뿌리 색이 비치는 정도,
@@ -24,8 +26,7 @@ const DENSITY = 95;            // 단위 길이당 털 가닥 수
 const COMB_W = 128, COMB_H = 64;
 const COMB_RELAX = 7;          // 쓸어 넘긴 털이 원래대로 돌아오는 시간(초) 규모
 const BRUSH_R = 0.16;          // 한 번 쓰다듬을 때 털 결이 바뀌는 범위
-const GRAIN = new THREE.Vector3(0, -0.25, -1).normalize();
-const SPHERE_CENTER = new THREE.Vector3(0, 0.15, 0.1); // hamster.js의 CENTER (UV 고리 반지름 계산용)
+const GRAIN = new THREE.Vector3(0, -0.25, -1).normalize(); // 기본 털 결: 코 → 엉덩이
 
 const HASH_GLSL = /* glsl */ `
 float h13(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
@@ -149,26 +150,22 @@ float strand(vec3 p, vec3 nl, float h, out float id) {
   return (1.0 - smoothstep(r - fw, r + fw, d)) * step(h, len);
 }
 
+// 격자 하나를 더 깔아 털 가닥을 늘림. 가장 진하게 덮는 가닥의 값(a)과 번호(id)를 남긴다.
+void addLayer(mat3 R, float scale, vec3 offset, vec3 nl, float h, inout float a, inout float id) {
+  float i;
+  float v = strand(R * vBase * uDensity * scale + offset, R * nl, h, i);
+  if (v > a) { a = v; id = i; }
+}
+
 void main() {
   float h = vH;
-  float id1, id2;
-  // 격자를 몸의 대칭면·축과 어긋나게 돌려서 줄무늬 자국이 생기지 않게
-  const mat3 R1 = mat3(0.788, 0.408, -0.461, -0.289, 0.902, 0.320, 0.545, -0.141, 0.827);
-  const mat3 R2 = mat3(0.612, -0.612, 0.500, 0.780, 0.390, -0.489, 0.104, 0.688, 0.718);
-  const mat3 R3 = mat3(0.354, 0.612, -0.707, -0.866, 0.500, 0.0, 0.354, 0.612, 0.707);
-  const mat3 R4 = mat3(0.433, -0.250, 0.866, 0.500, 0.866, 0.0, -0.750, 0.433, 0.500);
   vec3 nl = normalize(vNl);
-  float a1 = strand(R1 * vBase * uDensity, R1 * nl, h, id1);
-  float a2 = strand(R2 * vBase * uDensity * 1.37 + vec3(11.3, 7.1, 3.7), R2 * nl, h, id2);
-  float id3;
-  float a3 = strand(R3 * vBase * uDensity * 1.19 + vec3(5.7, 2.3, 9.1), R3 * nl, h, id3); // 세 번째 격자: 털 사이 빈틈 메우기
-  float id4;
-  float a4 = strand(R4 * vBase * uDensity * 1.09 + vec3(3.1, 8.3, 1.9), R4 * nl, h, id4); // 네 번째 격자: 밀도 더 높이기
-  float a = max(max(a1, a2), max(a3, a4));
-  float id = id1;
-  if (a2 > a1) id = id2;
-  if (a3 > max(a1, a2)) id = id3;
-  if (a4 > max(max(a1, a2), a3)) id = id4;
+  // 서로 다르게 돌린 격자 4개에 털을 심어 빽빽하게. 몸의 대칭면·축과 어긋나게 돌려서 줄무늬 자국을 막는다.
+  float a = 0.0, id = 0.5;
+  addLayer(mat3(0.788, 0.408, -0.461, -0.289, 0.902, 0.320, 0.545, -0.141, 0.827), 1.0,  vec3(0.0),            nl, h, a, id);
+  addLayer(mat3(0.612, -0.612, 0.500, 0.780, 0.390, -0.489, 0.104, 0.688, 0.718), 1.37, vec3(11.3, 7.1, 3.7), nl, h, a, id);
+  addLayer(mat3(0.354, 0.612, -0.707, -0.866, 0.500, 0.0, 0.354, 0.612, 0.707),   1.19, vec3(5.7, 2.3, 9.1),  nl, h, a, id);
+  addLayer(mat3(0.433, -0.250, 0.866, 0.500, 0.866, 0.0, -0.750, 0.433, 0.500),   1.09, vec3(3.1, 8.3, 1.9),  nl, h, a, id);
   if (h < 0.1) { a = 1.0; id = 0.5; } // 맨 안쪽은 촘촘한 속털
   if (a < 0.04) discard;
 
@@ -207,15 +204,27 @@ export function createFur(bodyGeometry, anchors, softBody) {
   combTex.needsUpdate = true;
   let combDirty = false;
 
+  // 털 색 uniform (setCoat으로 채움)
   const coat = {
-    uBack: { value: new THREE.Color(COATS.golden.back) },
-    uDark: { value: new THREE.Color(COATS.golden.dark) },
-    uBelly: { value: new THREE.Color(COATS.golden.belly) },
-    uRoot: { value: new THREE.Color(COATS.golden.root) },
-    uRootAmt: { value: COATS.golden.rootAmt },
-    uBellyShift: { value: COATS.golden.bellyShift },
-    uRootEdge: { value: new THREE.Vector2(...COATS.golden.rootEdge) },
+    uBack: { value: new THREE.Color() },
+    uDark: { value: new THREE.Color() },
+    uBelly: { value: new THREE.Color() },
+    uRoot: { value: new THREE.Color() },
+    uRootAmt: { value: 0 },
+    uBellyShift: { value: 0 },
+    uRootEdge: { value: new THREE.Vector2() },
   };
+  function setCoat(name) {
+    const c = COATS[name];
+    coat.uBack.value.set(c.back);
+    coat.uDark.value.set(c.dark);
+    coat.uBelly.value.set(c.belly);
+    coat.uRoot.value.set(c.root);
+    coat.uRootAmt.value = c.rootAmt;
+    coat.uBellyShift.value = c.bellyShift;
+    coat.uRootEdge.value.set(...c.rootEdge);
+  }
+  setCoat('golden');
   const uniforms = {
     ...softBody.uniforms,
     ...coat,
@@ -242,15 +251,7 @@ export function createFur(bodyGeometry, anchors, softBody) {
 
   return {
     mesh,
-    setCoat(name) {
-      coat.uBack.value.set(COATS[name].back);
-      coat.uDark.value.set(COATS[name].dark);
-      coat.uBelly.value.set(COATS[name].belly);
-      coat.uRoot.value.set(COATS[name].root);
-      coat.uRootAmt.value = COATS[name].rootAmt;
-      coat.uBellyShift.value = COATS[name].bellyShift;
-      coat.uRootEdge.value.set(...COATS[name].rootEdge);
-    },
+    setCoat,
 
     // 손이 닿은 곳의 털 눌림
     setTouch(localPoint, amount) {
@@ -261,7 +262,7 @@ export function createFur(bodyGeometry, anchors, softBody) {
     // 쓸어 넘긴 방향을 붓으로 칠하듯 UV 텍스처에 기록
     comb(uv, dir, strength, local) {
       const cx = uv.x * COMB_W - 0.5, cy = uv.y * COMB_H - 0.5;
-      const ringR = local ? Math.max(0.12, Math.hypot(local.x - SPHERE_CENTER.x, local.y - SPHERE_CENTER.y)) : 0.6;
+      const ringR = local ? Math.max(0.12, Math.hypot(local.x - CENTER.x, local.y - CENTER.y)) : 0.6;
       const ru = Math.min(40, (BRUSH_R * COMB_W) / (2 * Math.PI * ringR));
       const rv = (BRUSH_R * COMB_H) / (Math.PI * 1.1);
       for (let j = Math.floor(cy - rv); j <= Math.ceil(cy + rv); j++) {
@@ -279,8 +280,8 @@ export function createFur(bodyGeometry, anchors, softBody) {
       combDirty = true;
     },
 
-    // 다리: 다리 모양들을 몸 좌표로 합쳐 같은 털(배 색, 짧은 털)을 입힌 메시를 돌려줌. 원래 다리는 숨김.
-    // furScale: 털 길이 배율, tail: 꼬리처럼 엎드릴 때 다리 자세(모으기)를 따르지 않는 부위
+    // 다리·꼬리: 모양들을 몸 좌표로 합쳐 같은 털(배 색, 짧은 털)을 입힌 메시를 돌려줌. 원래 메시는 숨김.
+    // furScale: 털 길이 배율, tail: 엎드릴 때 다리 자세(모으기·집어넣기)를 따르지 않는 부위
     addLimbFur(limbs, { furScale = 1, tail = false } = {}) {
       const geos = [];
       for (const g of limbs) {
