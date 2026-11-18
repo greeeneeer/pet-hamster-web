@@ -20,10 +20,10 @@ const SHAPE = {
   snout: { c: new V3(0, 0.31, 1.06),  r: new V3(0.21, 0.2, 0.25) },   // 앞·위로 살짝 나온 주둥이
   hipL:  { c: new V3(0.3, -0.22, -0.68),   r: new V3(0.2, 0.24, 0.3) },  // 허벅지 살 (뒷다리가 여기서 내려옴)
   hipR:  { c: new V3(-0.3, -0.22, -0.68),  r: new V3(0.2, 0.24, 0.3) },
-  rumpL: { c: new V3(0.12, -0.04, -0.9),  r: new V3(0.28, 0.44, 0.36) }, // 왼·오른 엉덩이 덩어리 (많이 겹쳐서 위에서 보면 둥근 하나, 걸을 땐 좌우가 따로 들림)
-  rumpR: { c: new V3(-0.12, -0.04, -0.9), r: new V3(0.28, 0.44, 0.36) },
+  rumpL: { c: new V3(0.22, -0.04, -0.87), r: new V3(0.3, 0.44, 0.35) },  // 왼·오른 엉덩이 덩어리 (많이 겹치되 갈라진 티가 살짝 남. 걸을 땐 좌우가 따로 들림)
+  rumpR: { c: new V3(-0.22, -0.04, -0.87), r: new V3(0.3, 0.44, 0.35) },
 };
-const BLEND = { neck: 0.34, bridge: 0.2, snout: 0.25, chest: 0.24, hip: 0.3, rump: 0.16, rumpBody: 0.45, bottom: 0.06 };
+const BLEND = { neck: 0.34, bridge: 0.2, snout: 0.25, chest: 0.24, hip: 0.3, rump: 0.08, rumpBody: 0.38, bottom: 0.06 };
 // 걷기에서 같은 쪽 뒷다리가 들릴 때 통째로 들리는 엉덩이 덩어리 중심 (2: 왼쪽, 3: 오른쪽)
 export const RUMP_CENTERS = [SHAPE.rumpL.c, SHAPE.rumpR.c];
 
