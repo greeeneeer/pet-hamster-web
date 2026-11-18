@@ -16,6 +16,8 @@ import { sound } from './sound.js';
 
 const FPS = 30;           // 항상 초당 30프레임만 그려서 GPU 부담(발열)을 줄임
 const TURN_SPEED = 2.2;   // 방향을 트는 최대 속도 (rad/초)
+const HEAD_LEAD_MAX = 0.55;  // 방향을 틀 때 고개가 몸보다 먼저 돌아가는 최대 각도 (rad)
+const TURN_PIVOT_Z = 0.45;   // 몸이 도는 축: 몸 가운데보다 앞쪽(목 근처). 엉덩이가 바깥으로 휘돌아감
 const lerp = (a, b, k) => a + (b - a) * k;
 const ease = (x) => x * x * (3 - 2 * x);
 
@@ -99,7 +101,7 @@ const roamer = createRoamer({ roomRadius: ROOM_R });
 const camModes = createCameraModes({ camera, controls, walker, button: document.getElementById('cam') });
 
 // ── 기분 · 입력 ────────────────────────────────────
-const anim = { blink: 0, nextBlink: 2, close: 0, lie: 0, doze: 0, nextDoze: 8, walkSniff: 0 };
+const anim = { blink: 0, nextBlink: 2, close: 0, lie: 0, doze: 0, nextDoze: 8, walkSniff: 0, turnLead: 0 };
 const mood = createMood({ onTantrum: () => sound.hiss() });
 
 let hover = null, strokeT = 0, squeakedThisGrab = false;
@@ -262,13 +264,22 @@ renderer.setAnimationLoop(() => {
   // 돌아다니기: 만지거나 잡거나 엎드리거나 성질낼 때는 멈춤
   const busy = soft.held || mood.state.petting || !!hover || mood.state.lying || anim.lie > 0.05 || mood.state.tantrum > 0;
   const roam = roamer.update(dt, { pos: walker.position, enabled: roamOn, busy });
+  // 방향 바꾸기: 고개가 먼저 돌아가고, 몸은 앞쪽(목 근처)을 축으로 엉덩이를 휘두르며 뒤따라 돎
   let turnSlow = 1; // 많이 틀어야 할수록 천천히 걸음
+  let leadGoal = 0;
   if (roam.faceTo) {
     const want = Math.atan2(roam.faceTo.x - walker.position.x, roam.faceTo.z - walker.position.z);
     const diff = Math.atan2(Math.sin(want - walker.rotation.y), Math.cos(want - walker.rotation.y));
-    walker.rotation.y += THREE.MathUtils.clamp(diff, -TURN_SPEED * dt, TURN_SPEED * dt);
+    leadGoal = THREE.MathUtils.clamp(diff, -HEAD_LEAD_MAX, HEAD_LEAD_MAX);
+    const headFirst = Math.min(1, 0.1 + Math.abs(anim.turnLead) / Math.max(0.05, Math.abs(leadGoal))); // 고개가 돌아간 만큼 몸도 돎
+    const step = THREE.MathUtils.clamp(diff, -TURN_SPEED * dt, TURN_SPEED * dt) * headFirst;
+    const ry = walker.rotation.y, px = walker.position.x + Math.sin(ry) * TURN_PIVOT_Z, pz = walker.position.z + Math.cos(ry) * TURN_PIVOT_Z;
+    walker.rotation.y += step;
+    walker.position.x = px - Math.sin(ry + step) * TURN_PIVOT_Z;
+    walker.position.z = pz - Math.cos(ry + step) * TURN_PIVOT_Z;
     turnSlow = Math.max(0.15, Math.cos(Math.min(Math.abs(diff), Math.PI / 2)));
   }
+  anim.turnLead = lerp(anim.turnLead, leadGoal * (1 - hang.amount), Math.min(1, dt * 7));
 
   // 걸음·다리
   gait.update(dt, t, roam.speed, hang.amount);
@@ -282,7 +293,7 @@ renderer.setAnimationLoop(() => {
   keepInRoom(walker.position);
   // 걸으면서 킁킁: 고개를 살짝 숙이고 좌우로 이리저리 돌리며 냄새를 맡음 (불규칙하게 보이도록 두 흔들림을 섞음)
   anim.walkSniff = lerp(anim.walkSniff, Math.min(1, gait.stride) * (1 - hang.amount), Math.min(1, dt * 3));
-  const headYaw = anim.walkSniff * (0.3 * Math.sin(t * 1.6) + 0.12 * Math.sin(t * 3.7 + 1.3));
+  const headYaw = anim.turnLead + anim.walkSniff * (0.3 * Math.sin(t * 1.6) + 0.12 * Math.sin(t * 3.7 + 1.3)) * (1 - Math.abs(anim.turnLead) / HEAD_LEAD_MAX);
   const nod = Math.max(roam.nod * 0.45, anim.walkSniff * 0.12, hang.amount * 0.75); // 킁킁거릴 때 고개 숙임, 매달렸을 땐 머리가 푹 처짐
   u.uNod.value = nod;
   u.uHeadYaw.value = headYaw;
