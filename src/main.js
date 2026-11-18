@@ -17,7 +17,7 @@ import { sound } from './sound.js';
 const FPS = 30;           // 항상 초당 30프레임만 그려서 GPU 부담(발열)을 줄임
 const TURN_SPEED = 2.2;   // 방향을 트는 최대 속도 (rad/초)
 const HEAD_LEAD_MAX = 0.55;  // 방향을 틀 때 고개가 몸보다 먼저 돌아가는 최대 각도 (rad)
-const TURN_PIVOT_Z = 0.45;   // 몸이 도는 축: 몸 가운데보다 앞쪽(목 근처). 엉덩이가 바깥으로 휘돌아감
+const TURN_PIVOT_Z = 0.2;    // 몸이 도는 축: 몸 가운데보다 조금 앞쪽. 엉덩이가 살짝 바깥으로 돌아감
 const lerp = (a, b, k) => a + (b - a) * k;
 const ease = (x) => x * x * (3 - 2 * x);
 
@@ -264,7 +264,7 @@ renderer.setAnimationLoop(() => {
   // 돌아다니기: 만지거나 잡거나 엎드리거나 성질낼 때는 멈춤
   const busy = soft.held || mood.state.petting || !!hover || mood.state.lying || anim.lie > 0.05 || mood.state.tantrum > 0;
   const roam = roamer.update(dt, { pos: walker.position, enabled: roamOn, busy });
-  // 방향 바꾸기: 고개가 먼저 돌아가고, 몸은 앞쪽(목 근처)을 축으로 엉덩이를 휘두르며 뒤따라 돎
+  // 방향 바꾸기: 고개가 먼저 돌아가고, 몸은 가운데보다 조금 앞쪽을 축으로 뒤따라 돎
   let turnSlow = 1; // 많이 틀어야 할수록 천천히 걸음
   let leadGoal = 0;
   if (roam.faceTo) {
