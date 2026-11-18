@@ -13,9 +13,10 @@ const BREATH_AMP = 0.022;
 //  - 머리: 목 근처를 축으로 고개를 숙이고 아래로 내림
 //  - 앞다리(LIMB): 가운데로 모으며 몸 밑으로 집어넣음
 //  - 뒷발: 뒤로 뻗음
-//  - 전체: 바닥 쪽으로 납작하게 눌리며 옆으로 퍼짐
+//  - 전체: 바닥 쪽으로 납작하게 눌리며 옆으로 퍼짐 (엉덩이 쪽은 둥글게 모음)
 const PIVOT = new THREE.Vector3(0, 0.1, 0.25);
 const HEAD_ANGLE = 0.5, HEAD_DROP = 0.12, FLATTEN = 0.38, SPREAD = 0.16;
+const REAR_ROUND = 0.2; // 엎드릴 때 엉덩이 쪽은 덜 퍼지고 안으로 모여, 위에서 보면 둥근 하나로 보이게
 const LIMB_PINCH = 0.45, LIMB_TUCK = 0.12, HIND_STRETCH = 0.22; // 앞다리 모으기·집어넣기, 뒷발 뻗기
 const BODY_FOLLOW = 0.75, BODY_FOLLOW_R2 = 0.11; // 걸을 때 다리 주변 몸통 살이 따라가는 정도와 범위
 const RUMP_LIFT = 1.5, RUMP_R2 = 0.16;              // 뒷발을 들 때 같은 쪽 엉덩이 덩어리가 들리는 배율과 범위
@@ -50,7 +51,7 @@ vec3 posePos(vec3 p, float limb) {
   q.x *= 1.0 - ${f3(LIMB_PINCH)} * L * limb;   // 앞발 모으기
   q.z -= ${f3(LIMB_TUCK)} * L * limb;          // 몸 밑으로 집어넣기
   q.z -= ${f3(HIND_STRETCH)} * L * wHind;      // 뒷발 뒤로
-  q.x *= 1.0 + ${f3(SPREAD)} * L * spreadW;
+  q.x *= 1.0 + L * (${f3(SPREAD)} * spreadW - ${f3(REAR_ROUND)} * smoothstep(-0.6, -1.3, p.z));
   q.y = ${f3(FLOOR_Y)} + (q.y - ${f3(FLOOR_Y)}) * (1.0 - ${f3(FLATTEN)} * L);
   return q;
 }
@@ -148,7 +149,7 @@ export function posePos(p, lie, limb = 0, out = new THREE.Vector3(), nod = 0, ya
   out.x *= 1 - LIMB_PINCH * lie * limb;
   out.z -= LIMB_TUCK * lie * limb;
   out.z -= HIND_STRETCH * lie * wHind;
-  out.x *= 1 + SPREAD * lie * spreadW;
+  out.x *= 1 + lie * (SPREAD * spreadW - REAR_ROUND * sm(-0.6, -1.3, p.z));
   out.y = FLOOR_Y + (out.y - FLOOR_Y) * (1 - FLATTEN * lie);
   return out;
 }
