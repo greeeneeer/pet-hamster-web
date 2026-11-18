@@ -17,7 +17,7 @@ import { sound } from './sound.js';
 const FPS = 30;           // 항상 초당 30프레임만 그려서 GPU 부담(발열)을 줄임
 const TURN_SPEED = 2.2;   // 방향을 트는 최대 속도 (rad/초)
 const HEAD_LEAD_MAX = 0.55;  // 방향을 틀 때 고개가 몸보다 먼저 돌아가는 최대 각도 (rad)
-const TURN_PIVOT_Z = 0.2;    // 몸이 도는 축: 몸 가운데보다 조금 앞쪽. 엉덩이가 살짝 바깥으로 돌아감
+const TURN_EASE = 0.7;       // 남은 회전 각도가 이보다 작아지면 서서히 느려지며 멈춤 (rad)
 const lerp = (a, b, k) => a + (b - a) * k;
 const ease = (x) => x * x * (3 - 2 * x);
 
@@ -264,7 +264,7 @@ renderer.setAnimationLoop(() => {
   // 돌아다니기: 만지거나 잡거나 엎드리거나 성질낼 때는 멈춤
   const busy = soft.held || mood.state.petting || !!hover || mood.state.lying || anim.lie > 0.05 || mood.state.tantrum > 0;
   const roam = roamer.update(dt, { pos: walker.position, enabled: roamOn, busy });
-  // 방향 바꾸기: 고개가 먼저 돌아가고, 몸은 가운데보다 조금 앞쪽을 축으로 뒤따라 돎
+  // 방향 바꾸기: 고개가 먼저 돌아가고, 몸은 제자리에서 뒤따라 돎. 거의 다 돌았을 땐 서서히 느려짐
   let turnSlow = 1; // 많이 틀어야 할수록 천천히 걸음
   let leadGoal = 0;
   if (roam.faceTo) {
@@ -272,11 +272,8 @@ renderer.setAnimationLoop(() => {
     const diff = Math.atan2(Math.sin(want - walker.rotation.y), Math.cos(want - walker.rotation.y));
     leadGoal = THREE.MathUtils.clamp(diff, -HEAD_LEAD_MAX, HEAD_LEAD_MAX);
     const headFirst = Math.min(1, 0.1 + Math.abs(anim.turnLead) / Math.max(0.05, Math.abs(leadGoal))); // 고개가 돌아간 만큼 몸도 돎
-    const step = THREE.MathUtils.clamp(diff, -TURN_SPEED * dt, TURN_SPEED * dt) * headFirst;
-    const ry = walker.rotation.y, px = walker.position.x + Math.sin(ry) * TURN_PIVOT_Z, pz = walker.position.z + Math.cos(ry) * TURN_PIVOT_Z;
-    walker.rotation.y += step;
-    walker.position.x = px - Math.sin(ry + step) * TURN_PIVOT_Z;
-    walker.position.z = pz - Math.cos(ry + step) * TURN_PIVOT_Z;
+    const rate = TURN_SPEED * Math.min(1, Math.abs(diff) / TURN_EASE) * headFirst;
+    walker.rotation.y += Math.sign(diff) * Math.min(Math.abs(diff), rate * dt);
     turnSlow = Math.max(0.15, Math.cos(Math.min(Math.abs(diff), Math.PI / 2)));
   }
   anim.turnLead = lerp(anim.turnLead, leadGoal * (1 - hang.amount), Math.min(1, dt * 7));
